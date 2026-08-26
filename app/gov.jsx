@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
 import { AlertTriangle, Building2, CheckCircle2, Clock3, LogOut, MapPin, MessageSquareWarning, TrendingUp, UsersRound } from 'lucide-react-native';
 import { useAuth } from '../lib/auth';
-import { supabase } from '../lib/supabase';
+import { getReports, subscribeReports } from '../lib/localReports';
 import { Card, colors, Pill, Screen, SectionTitle } from '../components/ui';
 
 export default function GovDashboard() {
@@ -16,8 +16,7 @@ export default function GovDashboard() {
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async () => {
-    const { data: all } = await supabase.from('safeher_reports').select('id, category, location_label, details, created_at').order('created_at', { ascending: false });
-    const rows = all || [];
+    const rows = [...getReports()];
     setReports(rows);
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayCount = rows.filter((r) => new Date(r.created_at) >= todayStart).length;
@@ -29,7 +28,10 @@ export default function GovDashboard() {
     setRefreshing(false);
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+    return subscribeReports(loadData);
+  }, [loadData]);
 
   async function handleSignOut() {
     await signOut();
@@ -81,6 +83,7 @@ export default function GovDashboard() {
             </View>
             <View style={s.reportLoc}><MapPin color={colors.muted} size={14} /><Text style={s.reportLocText}>{item.location_label}</Text></View>
             {item.details ? <Text style={s.reportDetails}>{item.details}</Text> : null}
+            {item.image_uri ? <Image source={{ uri: item.image_uri }} style={s.reportImage} /> : null}
             <View style={s.reportActions}>
               <Pressable style={s.reviewBtn}><CheckCircle2 color={colors.teal} size={16} /><Text style={s.reviewText}>Mark reviewed</Text></Pressable>
             </View>
@@ -131,6 +134,7 @@ const s = StyleSheet.create({
   reportLoc: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 8 },
   reportLocText: { color: colors.ink, fontSize: 14, fontWeight: '700' },
   reportDetails: { color: colors.muted, fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  reportImage: { width: '100%', height: 150, borderRadius: 12, marginBottom: 12 },
   reportActions: { flexDirection: 'row', gap: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12 },
   reviewBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reviewText: { color: colors.teal, fontSize: 12, fontWeight: '800' },

@@ -113,7 +113,7 @@ const s = StyleSheet.create({
   roleText: { color: colors.muted, fontWeight: '700', fontSize: 13 },
   roleTextActive: { color: colors.white },
   field: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 13, paddingHorizontal: 13, marginBottom: 12, height: 50 },
-  input: { flex: 1, color: colors.ink, fontSize: 14, marginLeft: 9 },
+  input: { flex: 1, color: colors.ink, fontSize: 14, marginLeft: 9, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
   errorBox: { backgroundColor: '#FFF0F0', borderRadius: 12, padding: 12, marginBottom: 12 },
   errorText: { color: '#C24141', fontSize: 12, lineHeight: 18, fontWeight: '600' },
   submit: { height: 50, borderRadius: 13, backgroundColor: colors.teal, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 },

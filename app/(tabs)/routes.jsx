@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, ActivityIndicator, ScrollView } from 'react-native';
 import { ArrowUpDown, Clock3, Crosshair, MapPin, Navigation, ShieldCheck, Sparkles, Route as RouteIcon, X, Home, Briefcase, Check } from 'lucide-react-native';
 import { Card, colors, Header, Pill, Screen, SectionTitle } from '../../components/ui';
@@ -39,11 +39,12 @@ export default function RoutesScreen() {
     requestLocation();
   }
 
-  if (location && locating) {
+  useEffect(() => {
+    if (!location || !locating) return;
     if (locating === 'from') fillFromCoords(location.lat, location.lng);
     else if (locating === 'to') fillToCoords(location.lat, location.lng);
     setLocating('');
-  }
+  }, [location, locating, fillFromCoords, fillToCoords]);
 
   function swapLocations() {
     const tmpText = from, tmpCoords = fromCoords;
@@ -243,9 +244,7 @@ function SearchField({ label, value, coords, active, suggestions, iconColor, onC
           style={s.input}
           autoCapitalize="words"
         />
-        {value ? (
-          <Pressable onPress={onClear} style={s.clearBtn}><X color={colors.muted} size={15} /></Pressable>
-        ) : null}
+        <Pressable disabled={!value} onPress={onClear} style={[s.clearBtn, !value && s.clearBtnHidden]}><X color={colors.muted} size={15} /></Pressable>
         <Pressable onPress={onLocate} style={s.locateBtn}>
           {locating ? <ActivityIndicator color={iconColor} size="small" /> : <Crosshair color={iconColor} size={16} />}
         </Pressable>
@@ -255,7 +254,7 @@ function SearchField({ label, value, coords, active, suggestions, iconColor, onC
           <Text style={s.suggestionsHeader}>Chennai areas</Text>
           <ScrollView style={s.suggestionsScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
             {suggestions.slice(0, 6).map((area) => (
-              <Pressable key={area.name} onPress={() => onSelectArea(area)} style={({ pressed }) => [s.suggestion, pressed && s.pressed]}>
+              <Pressable key={area.name} onPressIn={() => onSelectArea(area)} style={({ pressed }) => [s.suggestion, pressed && s.pressed]}>
                 <View style={[s.suggestionIcon, { backgroundColor: iconColor + '15' }]}>
                   <MapPin color={iconColor} size={14} />
                 </View>
@@ -281,17 +280,18 @@ const s = StyleSheet.create({
   dotFrom: { backgroundColor: colors.teal },
   dotTo: { backgroundColor: colors.pink },
   dotLine: { width: 2, flex: 1, backgroundColor: colors.line, marginVertical: 4, minHeight: 24 },
-  inputsColumn: { flex: 1, flexDirection: 'column' },
-  fieldWrap: { position: 'relative', zIndex: 1 },
-  fieldInner: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: colors.line, borderRadius: 14, paddingHorizontal: 12, height: 50, gap: 8 },
-  fieldLeft: { width: 38 },
+  inputsColumn: { flex: 1, minWidth: 0, flexDirection: 'column' },
+  fieldWrap: { position: 'relative', zIndex: 1, width: '100%' },
+  fieldInner: { flexDirection: 'row', alignItems: 'center', width: '100%', boxSizing: 'border-box', borderWidth: 1.5, borderColor: colors.line, borderRadius: 14, paddingHorizontal: 12, height: 50, gap: 8 },
+  fieldLeft: { width: 38, flexShrink: 0 },
   fieldLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
-  input: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600', paddingVertical: 4 },
+  input: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 14, fontWeight: '600', paddingVertical: 4, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
   clearBtn: { width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  clearBtnHidden: { opacity: 0 },
   locateBtn: { width: 34, height: 34, borderRadius: 11, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center' },
   fieldDivider: { height: 12 },
   swapBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center', marginTop: 10, marginLeft: 8 },
-  suggestions: { position: 'absolute', top: 54, left: 0, right: 0, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.line, zIndex: 100, padding: 6, maxHeight: 240, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 },
+  suggestions: { position: 'relative', marginTop: 6, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.line, zIndex: 100, padding: 6, maxHeight: 240, boxShadow: '0px 6px 16px rgba(0, 0, 0, 0.12)' },
   suggestionsHeader: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, color: colors.muted, textTransform: 'uppercase', paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
   suggestionsScroll: { maxHeight: 200 },
   suggestion: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 11, borderRadius: 12 },

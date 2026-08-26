@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, ScrollView, SafeAreaView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Check, Home, MapPin, Briefcase, Phone, UserRound, ShieldCheck, Navigation, Crosshair } from 'lucide-react-native';
@@ -48,9 +48,10 @@ export default function EditProfileScreen() {
     setLocating('');
   }
 
-  if (location && locating) {
+  useEffect(() => {
+    if (!location || !locating) return;
     handleSetLocation(locating);
-  }
+  }, [location, locating]);
 
   async function handleSave() {
     setError('');
@@ -160,7 +161,7 @@ const s = StyleSheet.create({
   sectionLabel: { color: colors.muted, fontSize: 12, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10, marginTop: 4 },
   card: { backgroundColor: colors.white, borderRadius: 18, padding: 4, borderWidth: 1, borderColor: colors.line, marginBottom: 16 },
   fieldRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
-  input: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600' },
+  input: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600', outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
   placeCopy: { flex: 1 },
   placeLabel: { color: colors.muted, fontSize: 11, fontWeight: '700', marginBottom: 3 },
   placeValue: { color: colors.ink, fontSize: 14, fontWeight: '600' },
