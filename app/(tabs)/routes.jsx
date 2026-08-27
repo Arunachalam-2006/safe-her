@@ -1,101 +1,58 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, ActivityIndicator, ScrollView } from 'react-native';
-import { ArrowUpDown, Clock3, Crosshair, MapPin, Navigation, ShieldCheck, Sparkles, Route as RouteIcon, X, Home, Briefcase, Check } from 'lucide-react-native';
+import { Bike, Check, Clock3, Crosshair, Footprints, MapPin, Sparkles, Route as RouteIcon, Car, X } from 'lucide-react-native';
 import { Card, colors, Header, Pill, Screen, SectionTitle } from '../../components/ui';
-import { useAuth } from '../../lib/auth';
-import { useLocation, haversineDistance, estimateTravelTime, formatDistance, formatDuration, reverseGeocode, searchChennaiAreas, geocodePlace } from '../../lib/location';
+import { useLocation, formatDistance, formatDuration, reverseGeocode, searchLocation, getRoute } from '../../lib/location';
+import RouteMap from '../../components/RouteMap';
 
 export default function RoutesScreen() {
-  const { profile } = useAuth();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [fromCoords, setFromCoords] = useState(null);
   const [toCoords, setToCoords] = useState(null);
-  const [selected, setSelected] = useState('Safest');
-  const [planned, setPlanned] = useState(false);
+  const [route, setRoute] = useState(null);
+  const [mode, setMode] = useState('driving');
   const [error, setError] = useState('');
-  const [locating, setLocating] = useState('');
   const [planning, setPlanning] = useState(false);
-  const [activeField, setActiveField] = useState(null);
-  const { location, requestLocation, loading: locLoading } = useLocation();
+  const [activeField, setActiveField] = useState('to');
+  const [suggestions, setSuggestions] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const { location, requestLocation, loading: locLoading, error: locationError } = useLocation();
 
-  const fillFromCoords = useCallback(async (lat, lng, label) => {
-    setFromCoords({ lat, lng });
-    if (label) { setFrom(label); }
-    else { const l = await reverseGeocode(lat, lng); setFrom(l); }
-  }, []);
-
-  const fillToCoords = useCallback(async (lat, lng, label) => {
-    setToCoords({ lat, lng });
-    if (label) { setTo(label); }
-    else { const l = await reverseGeocode(lat, lng); setTo(l); }
-  }, []);
-
-  function handleLocate(target) {
-    setError('');
-    if (target === 'home' && profile?.home_lat) { fillFromCoords(profile.home_lat, profile.home_lng, profile.home_label); return; }
-    if (target === 'work' && profile?.work_lat) { fillToCoords(profile.work_lat, profile.work_lng, profile.work_label); return; }
-    setLocating(target);
-    requestLocation();
-  }
+  useEffect(() => { requestLocation(); }, [requestLocation]);
 
   useEffect(() => {
-    if (!location || !locating) return;
-    if (locating === 'from') fillFromCoords(location.lat, location.lng);
-    else if (locating === 'to') fillToCoords(location.lat, location.lng);
-    setLocating('');
-  }, [location, locating, fillFromCoords, fillToCoords]);
+    if (!location) return;
+    setFromCoords(location);
+    reverseGeocode(location.lat, location.lng).then(setFrom);
+  }, [location]);
 
-  function swapLocations() {
-    const tmpText = from, tmpCoords = fromCoords;
-    setFrom(to); setFromCoords(toCoords);
-    setTo(tmpText); setToCoords(tmpCoords);
-  }
-
-  function selectArea(area, target) {
-    if (target === 'from') fillFromCoords(area.lat, area.lng, area.name + ', Chennai');
-    else fillToCoords(area.lat, area.lng, area.name + ', Chennai');
-    setActiveField(null);
-  }
+  useEffect(() => {
+    if (activeField !== 'to' || to.trim().length < 3) { setSuggestions([]); return undefined; }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const results = await searchLocation(to);
+        if (!cancelled) setSuggestions(results);
+      } catch (e) {
+        if (!cancelled) setError('Could not search destinations. Check your connection and try again.');
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 600);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [to, activeField]);
 
   async function handlePlan() {
     setError('');
-    if (!from.trim() && !fromCoords) { setError('Add a starting point — type a Chennai area or use the location pin.'); return; }
-    if (!to.trim() && !toCoords) { setError('Add a destination — type a Chennai area or use the location pin.'); return; }
-
+    if (!fromCoords) { setError(locationError || 'Allow location access to set your current location.'); return; }
+    if (!toCoords) { setError('Search for and select a destination first.'); return; }
     setPlanning(true);
-    let start = fromCoords;
-    let end = toCoords;
-
-    if (!start && from.trim()) {
-      const result = await geocodePlace(from.trim());
-      if (!result) { setError(`Could not find "${from.trim()}" in Chennai. Try a known area like Adyar or T. Nagar.`); setPlanning(false); return; }
-      start = { lat: result.lat, lng: result.lng };
-      setFromCoords(start);
-      setFrom(result.label);
-    }
-    if (!end && to.trim()) {
-      const result = await geocodePlace(to.trim());
-      if (!result) { setError(`Could not find "${to.trim()}" in Chennai. Try a known area like Adyar or T. Nagar.`); setPlanning(false); return; }
-      end = { lat: result.lat, lng: result.lng };
-      setToCoords(end);
-      setTo(result.label);
-    }
-    setPlanning(false);
-    if (start && end) setPlanned(true);
+    try { setRoute(await getRoute(fromCoords, toCoords, mode)); }
+    catch (e) { setError(e.message || 'Could not calculate this route. Please try again.'); }
+    finally { setPlanning(false); }
   }
-
-  const distance = fromCoords && toCoords ? haversineDistance(fromCoords.lat, fromCoords.lng, toCoords.lat, toCoords.lng) : null;
-  const baseMinutes = distance !== null ? estimateTravelTime(distance, 'bus') : null;
-
-  const routeOptions = baseMinutes !== null ? [
-    { name: 'Safest', score: 91, minutes: baseMinutes + 7, extra: `+${formatDuration(7)}`, color: colors.pink, note: 'Best lighting and highest community confidence — passes through well-monitored roads' },
-    { name: 'Balanced', score: 84, minutes: baseMinutes + 1, extra: `+${formatDuration(1)}`, color: colors.teal, note: 'A strong everyday option with reliable bus frequency' },
-    { name: 'Fastest', score: 68, minutes: baseMinutes, extra: 'Fastest', color: colors.orange, note: 'Fewer stops, but a darker final segment' },
-  ] : [];
-
-  const fromSuggestions = activeField === 'from' ? searchChennaiAreas(from) : [];
-  const toSuggestions = activeField === 'to' ? searchChennaiAreas(to) : [];
 
   return (
     <Screen>
@@ -114,16 +71,17 @@ export default function RoutesScreen() {
               label="From"
               value={from}
               coords={fromCoords}
-              active={activeField === 'from'}
-              suggestions={fromSuggestions}
+              active={false}
+              suggestions={[]}
               iconColor={colors.teal}
-              onChangeText={(t) => { setFrom(t); setFromCoords(null); setActiveField('from'); }}
-              onFocus={() => setActiveField('from')}
-              onBlur={() => setTimeout(() => setActiveField(null), 180)}
-              onClear={() => { setFrom(''); setFromCoords(null); }}
-              onLocate={() => handleLocate('from')}
-              locating={locating === 'from' && locLoading}
-              onSelectArea={(area) => selectArea(area, 'from')}
+              editable={false}
+              placeholder={locLoading ? 'Getting current location...' : 'Current location'}
+              onChangeText={() => {}}
+              onFocus={() => {}}
+              onBlur={() => {}}
+              onClear={() => {}}
+              onLocate={requestLocation}
+              locating={locLoading}
             />
             <View style={s.fieldDivider} />
             <SearchField
@@ -131,36 +89,21 @@ export default function RoutesScreen() {
               value={to}
               coords={toCoords}
               active={activeField === 'to'}
-              suggestions={toSuggestions}
+              suggestions={suggestions}
               iconColor={colors.pink}
-              onChangeText={(t) => { setTo(t); setToCoords(null); setActiveField('to'); }}
+              onChangeText={(t) => { setTo(t); setToCoords(null); setRoute(null); setError(''); setActiveField('to'); }}
               onFocus={() => setActiveField('to')}
-              onBlur={() => setTimeout(() => setActiveField(null), 180)}
+              onBlur={() => setTimeout(() => setActiveField(null), 500)}
               onClear={() => { setTo(''); setToCoords(null); }}
-              onLocate={() => handleLocate('to')}
-              locating={locating === 'to' && locLoading}
-              onSelectArea={(area) => selectArea(area, 'to')}
+              onLocate={() => {}}
+              locating={searching}
+              onSelectArea={(place) => { setTo(place.name); setToCoords({ lat: place.lat, lng: place.lng }); setSuggestions([]); setActiveField(null); setError(''); }}
             />
           </View>
 
-          <Pressable onPress={swapLocations} style={s.swapBtn}>
-            <ArrowUpDown color={colors.muted} size={15} />
-          </Pressable>
         </View>
 
         <View style={s.quickRow}>
-          {profile?.home_label ? (
-            <Pressable onPress={() => handleLocate('home')} style={({ pressed }) => [s.quickPlace, pressed && s.pressed]}>
-              <Home color={colors.teal} size={15} />
-              <Text style={s.quickPlaceText} numberOfLines={1}>Home</Text>
-            </Pressable>
-          ) : null}
-          {profile?.work_label ? (
-            <Pressable onPress={() => handleLocate('work')} style={({ pressed }) => [s.quickPlace, pressed && s.pressed]}>
-              <Briefcase color={colors.orange} size={15} />
-              <Text style={s.quickPlaceText} numberOfLines={1}>Work</Text>
-            </Pressable>
-          ) : null}
           <View style={{ flex: 1 }} />
           {fromCoords ? <Pill tone="teal">From set</Pill> : null}
           {toCoords ? <Pill tone="pink">To set</Pill> : null}
@@ -171,54 +114,52 @@ export default function RoutesScreen() {
         {planning ? <ActivityIndicator color={colors.white} size="small" /> : <><Sparkles color={colors.white} size={18} /><Text style={s.planText}>Find safer routes</Text></>}
       </Pressable>
 
+      <View style={s.modeRow}>
+        {[['driving', 'Driving', Car], ['walking', 'Walking', Footprints], ['cycling', 'Cycling', Bike]].map(([key, label, Icon]) => (
+          <Pressable key={key} onPress={() => { setMode(key); setRoute(null); }} style={[s.modeChip, mode === key && s.modeActive]}>
+            <Icon color={mode === key ? colors.white : colors.muted} size={16} />
+            <Text style={[s.modeText, mode === key && s.modeTextActive]}>{label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
       {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
 
-      {planned && distance !== null ? (
+      {fromCoords || toCoords ? <Card style={s.mapCard}><RouteMap source={fromCoords} destination={toCoords} route={route} /></Card> : null}
+
+      {route ? (
         <>
           <Card style={s.summaryCard}>
             <View style={s.summaryRow}>
               <RouteIcon color={colors.teal} size={18} />
-              <Text style={s.summaryText}>{formatDistance(distance)} straight-line</Text>
+              <Text style={s.summaryText}>{formatDistance(route.distanceKm)} by road</Text>
             </View>
             <View style={s.summaryDivider} />
             <View style={s.summaryRow}>
               <Clock3 color={colors.teal} size={18} />
-              <Text style={s.summaryText}>~{formatDuration(baseMinutes)} by bus</Text>
+              <Text style={s.summaryText}>{formatDuration(route.durationMin)}{route.trafficDelayMin ? ` (+${route.trafficDelayMin} traffic)` : ''}</Text>
             </View>
           </Card>
 
-          <SectionTitle action={<Text style={s.updated}>Estimated</Text>}>Choose your route</SectionTitle>
-          {routeOptions.map((route) => (
-            <Pressable key={route.name} onPress={() => setSelected(route.name)} style={({ pressed }) => [s.routeCard, selected === route.name && { borderColor: route.color, borderWidth: 2 }, pressed && s.pressed]}>
+          <SectionTitle action={<Text style={s.updated}>{route.provider}</Text>}>Route result</SectionTitle>
+          <View style={[s.routeCard, { borderColor: colors.teal, borderWidth: 2 }]}>
               <View style={s.routeTop}>
                 <View style={s.routeName}>
-                  <View style={[s.routeDot, { backgroundColor: route.color }]} />
-                  <Text style={s.name}>{route.name}</Text>
-                  {route.name === 'Safest' && <Pill tone="pink">Recommended</Pill>}
+                  <View style={[s.routeDot, { backgroundColor: colors.teal }]} />
+                  <Text style={s.name}>{mode === 'driving' ? 'Driving route' : mode === 'walking' ? 'Walking route' : 'Cycling route'}</Text>
                 </View>
-                <Text style={[s.routeScore, { color: route.color }]}>{route.score}</Text>
               </View>
               <View style={s.routeMeta}>
-                <View style={s.meta}><Clock3 color={colors.muted} size={15} /><Text style={s.metaText}>{formatDuration(route.minutes)}</Text></View>
-                <Text style={s.extra}>{route.extra}</Text>
+                <View style={s.meta}><Clock3 color={colors.muted} size={15} /><Text style={s.metaText}>{formatDuration(route.durationMin)}</Text></View>
+                <Text style={s.extra}>{formatDistance(route.distanceKm)}</Text>
               </View>
-              <Text style={s.note}>{route.note}</Text>
-              {selected === route.name ? (
-                <View style={s.selectedBar}>
-                  <View style={s.selectedLeft}>
-                    <View style={[s.checkIcon, { backgroundColor: route.color }]}><Check color={colors.white} size={12} /></View>
-                    <Text style={s.selectedText}>Selected — tap "Start journey" on the Journey tab</Text>
-                  </View>
-                </View>
-              ) : null}
-            </Pressable>
-          ))}
+              <Text style={s.note}>{route.provider}{route.trafficDelayMin ? `, including ${route.trafficDelayMin} min traffic delay.` : '.'}</Text>
+          </View>
 
           <Card style={s.tip}>
-            <ShieldCheck color={colors.teal} size={22} />
             <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={s.tipTitle}>Why this score?</Text>
-              <Text style={s.tipText}>Scores combine lighting, crowd levels, recent reports, transport reliability, and nearby help across Chennai routes.</Text>
+              <Text style={s.tipTitle}>Safety analysis coming soon</Text>
+              <Text style={s.tipText}>This route uses real map data. Safety insights will be added in a future module.</Text>
             </View>
           </Card>
         </>
@@ -227,7 +168,7 @@ export default function RoutesScreen() {
   );
 }
 
-function SearchField({ label, value, coords, active, suggestions, iconColor, onChangeText, onFocus, onBlur, onClear, onLocate, locating, onSelectArea }) {
+function SearchField({ label, value, coords, active, suggestions, iconColor, onChangeText, onFocus, onBlur, onClear, onLocate, locating, onSelectArea, editable = true, placeholder }) {
   return (
     <View style={s.fieldWrap}>
       <View style={[s.fieldInner, active && { borderColor: iconColor, borderWidth: 2 }]}>
@@ -239,28 +180,29 @@ function SearchField({ label, value, coords, active, suggestions, iconColor, onC
           onChangeText={onChangeText}
           onFocus={onFocus}
           onBlur={onBlur}
-          placeholder={`Search Chennai area…`}
+          editable={editable}
+          placeholder={placeholder || 'Search for a destination...'}
           placeholderTextColor={colors.muted}
           style={s.input}
           autoCapitalize="words"
         />
         <Pressable disabled={!value} onPress={onClear} style={[s.clearBtn, !value && s.clearBtnHidden]}><X color={colors.muted} size={15} /></Pressable>
-        <Pressable onPress={onLocate} style={s.locateBtn}>
+        {onLocate ? <Pressable onPress={onLocate} style={s.locateBtn}>
           {locating ? <ActivityIndicator color={iconColor} size="small" /> : <Crosshair color={iconColor} size={16} />}
-        </Pressable>
+        </Pressable> : null}
       </View>
       {active && suggestions.length > 0 ? (
         <View style={s.suggestions}>
-          <Text style={s.suggestionsHeader}>Chennai areas</Text>
+          <Text style={s.suggestionsHeader}>Real location results</Text>
           <ScrollView style={s.suggestionsScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
             {suggestions.slice(0, 6).map((area) => (
-              <Pressable key={area.name} onPressIn={() => onSelectArea(area)} style={({ pressed }) => [s.suggestion, pressed && s.pressed]}>
+              <Pressable key={area.label} onPressIn={() => onSelectArea(area)} onPress={() => onSelectArea(area)} style={({ pressed }) => [s.suggestion, pressed && s.pressed]}>
                 <View style={[s.suggestionIcon, { backgroundColor: iconColor + '15' }]}>
                   <MapPin color={iconColor} size={14} />
                 </View>
                 <View style={s.suggestionCopy}>
                   <Text style={s.suggestionText}>{area.name}</Text>
-                  <Text style={s.suggestionSub}>Chennai, Tamil Nadu</Text>
+                  <Text style={s.suggestionSub}>{area.label.split(',').slice(2, 4).join(',').trim() || 'Location result'}</Text>
                 </View>
                 {coords && coords.lat === area.lat ? <Check color={iconColor} size={15} /> : null}
               </Pressable>
@@ -273,6 +215,7 @@ function SearchField({ label, value, coords, active, suggestions, iconColor, onC
 }
 
 const s = StyleSheet.create({
+  mapCard: { padding: 0, overflow: 'hidden', height: 230 },
   searchCard: { backgroundColor: colors.white, borderRadius: 20, borderWidth: 1, borderColor: colors.line, marginBottom: 12, overflow: 'visible' },
   searchBody: { flexDirection: 'row', padding: 16, paddingBottom: 10 },
   endpointColumn: { width: 28, alignItems: 'center', paddingTop: 18 },
@@ -305,6 +248,11 @@ const s = StyleSheet.create({
   quickPlaceText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
   planButton: { backgroundColor: colors.teal, borderRadius: 16, height: 52, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   planText: { color: colors.white, fontSize: 15, fontWeight: '800' },
+  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  modeChip: { flex: 1, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
+  modeActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  modeText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
+  modeTextActive: { color: colors.white },
   errorBox: { backgroundColor: '#FFF0F0', borderRadius: 12, padding: 12, marginBottom: 16 },
   errorText: { color: '#C24141', fontSize: 12, lineHeight: 18, fontWeight: '600' },
   summaryCard: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 },
