@@ -15,6 +15,7 @@ export default function RoutesScreen() {
   const [error, setError] = useState('');
   const [planning, setPlanning] = useState(false);
   const [activeField, setActiveField] = useState('to');
+  const [searchField, setSearchField] = useState('to');
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
   const { location, requestLocation, loading: locLoading, error: locationError } = useLocation();
@@ -28,12 +29,13 @@ export default function RoutesScreen() {
   }, [location]);
 
   useEffect(() => {
-    if (activeField !== 'to' || to.trim().length < 3) { setSuggestions([]); return undefined; }
+    const query = searchField === 'from' ? from : to;
+    if (!activeField || activeField !== searchField || query.trim().length < 3) { setSuggestions([]); return undefined; }
     let cancelled = false;
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const results = await searchLocation(to);
+        const results = await searchLocation(query);
         if (!cancelled) setSuggestions(results);
       } catch (e) {
         if (!cancelled) setError('Could not search destinations. Check your connection and try again.');
@@ -42,7 +44,7 @@ export default function RoutesScreen() {
       }
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [to, activeField]);
+  }, [from, to, activeField, searchField]);
 
   async function handlePlan() {
     setError('');
@@ -71,17 +73,18 @@ export default function RoutesScreen() {
               label="From"
               value={from}
               coords={fromCoords}
-              active={false}
-              suggestions={[]}
+              active={activeField === 'from'}
+              suggestions={searchField === 'from' ? suggestions : []}
               iconColor={colors.teal}
-              editable={false}
+              editable
               placeholder={locLoading ? 'Getting current location...' : 'Current location'}
-              onChangeText={() => {}}
-              onFocus={() => {}}
-              onBlur={() => {}}
-              onClear={() => {}}
+              onChangeText={(text) => { setFrom(text); setFromCoords(null); setRoute(null); setError(''); setActiveField('from'); setSearchField('from'); }}
+              onFocus={() => { setActiveField('from'); setSearchField('from'); }}
+              onBlur={() => setTimeout(() => setActiveField(null), 500)}
+              onClear={() => { setFrom(''); setFromCoords(null); setRoute(null); }}
               onLocate={requestLocation}
               locating={locLoading}
+              onSelectArea={(place) => { setFrom(place.name); setFromCoords({ lat: place.lat, lng: place.lng }); setSuggestions([]); setActiveField(null); setError(''); }}
             />
             <View style={s.fieldDivider} />
             <SearchField
@@ -92,7 +95,7 @@ export default function RoutesScreen() {
               suggestions={suggestions}
               iconColor={colors.pink}
               onChangeText={(t) => { setTo(t); setToCoords(null); setRoute(null); setError(''); setActiveField('to'); }}
-              onFocus={() => setActiveField('to')}
+              onFocus={() => { setActiveField('to'); setSearchField('to'); }}
               onBlur={() => setTimeout(() => setActiveField(null), 500)}
               onClear={() => { setTo(''); setToCoords(null); }}
               onLocate={() => {}}

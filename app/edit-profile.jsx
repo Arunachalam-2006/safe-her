@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View, ScrollView, SafeAreaView, ActivityIndicator } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View, ScrollView, SafeAreaView, ActivityIndicator, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Check, Home, MapPin, Briefcase, Phone, UserRound, ShieldCheck, Navigation, Crosshair } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { ArrowLeft, Check, Home, MapPin, Briefcase, Phone, UserRound, ShieldCheck, Navigation, Crosshair, Camera, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../lib/auth';
 import { colors } from '../components/ui';
 import { useLocation, haversineDistance, reverseGeocode } from '../lib/location';
@@ -9,6 +10,7 @@ import { useLocation, haversineDistance, reverseGeocode } from '../lib/location'
 export default function EditProfileScreen() {
   const router = useRouter();
   const { profile, updateProfile } = useAuth();
+  const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || null);
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [phone, setPhone] = useState(profile?.phone || '');
   const [emergencyName, setEmergencyName] = useState(profile?.emergency_contact_name || '');
@@ -24,6 +26,22 @@ export default function EditProfileScreen() {
   const [success, setSuccess] = useState(false);
   const [locating, setLocating] = useState('');
   const { location, requestLocation } = useLocation();
+
+  const initial = (fullName || profile?.email || 'U').charAt(0).toUpperCase();
+
+  async function pickPhoto() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled) setAvatarUrl(result.assets[0].uri);
+  }
+
+  function removePhoto() {
+    setAvatarUrl(null);
+  }
 
   async function useCurrentLocation(target) {
     setLocating(target);
@@ -58,6 +76,7 @@ export default function EditProfileScreen() {
     if (!fullName.trim()) { setError('Your name cannot be empty.'); return; }
     setSaving(true);
     const { error: e } = await updateProfile({
+      avatar_url: avatarUrl,
       full_name: fullName.trim(),
       phone: phone.trim(),
       emergency_contact_name: emergencyName.trim(),
@@ -85,6 +104,34 @@ export default function EditProfileScreen() {
         <View style={s.backBtn} />
       </View>
       <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+        <Text style={s.sectionLabel}>Profile photo</Text>
+        <Card style={s.avatarCard}>
+          <View style={s.avatarWrapper}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={s.avatarImg} />
+            ) : (
+              <View style={s.avatarPlaceholder}>
+                <Text style={s.avatarInitials}>{initial}</Text>
+              </View>
+            )}
+            <Pressable onPress={pickPhoto} style={s.cameraBadge}>
+              <Camera color={colors.white} size={14} />
+            </Pressable>
+          </View>
+          <View style={s.avatarActions}>
+            <Pressable onPress={pickPhoto} style={({ pressed }) => [s.photoBtn, pressed && s.pressed]}>
+              <Camera color={colors.teal} size={16} />
+              <Text style={s.photoBtnText}>{avatarUrl ? 'Change photo' : 'Upload photo'}</Text>
+            </Pressable>
+            {avatarUrl ? (
+              <Pressable onPress={removePhoto} style={({ pressed }) => [s.removeBtn, pressed && s.pressed]}>
+                <Trash2 color={colors.pink} size={16} />
+                <Text style={s.removeBtnText}>Remove</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </Card>
+
         <Text style={s.sectionLabel}>Personal details</Text>
         <Card>
           <FieldRow icon={<UserRound color={colors.teal} size={18} />}><TextInput style={s.input} value={fullName} onChangeText={setFullName} placeholder="Full name" placeholderTextColor={colors.muted} /></FieldRow>
@@ -125,8 +172,8 @@ export default function EditProfileScreen() {
   );
 }
 
-function Card({ children }) {
-  return <View style={s.card}>{children}</View>;
+function Card({ children, style }) {
+  return <View style={[s.card, style]}>{children}</View>;
 }
 
 function FieldRow({ icon, children }) {
@@ -160,6 +207,17 @@ const s = StyleSheet.create({
   content: { padding: 20, paddingBottom: 40 },
   sectionLabel: { color: colors.muted, fontSize: 12, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10, marginTop: 4 },
   card: { backgroundColor: colors.white, borderRadius: 18, padding: 4, borderWidth: 1, borderColor: colors.line, marginBottom: 16 },
+  avatarCard: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 16 },
+  avatarWrapper: { position: 'relative' },
+  avatarImg: { width: 72, height: 72, borderRadius: 26, borderWidth: 2, borderColor: colors.teal },
+  avatarPlaceholder: { width: 72, height: 72, borderRadius: 26, backgroundColor: colors.tealSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.line },
+  avatarInitials: { color: colors.teal, fontSize: 26, fontWeight: '800' },
+  cameraBadge: { position: 'absolute', bottom: -2, right: -2, width: 26, height: 26, borderRadius: 10, backgroundColor: colors.teal, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.white },
+  avatarActions: { flex: 1, gap: 8 },
+  photoBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.tealSoft, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, alignSelf: 'flex-start' },
+  photoBtnText: { color: colors.teal, fontSize: 13, fontWeight: '800' },
+  removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, alignSelf: 'flex-start' },
+  removeBtnText: { color: colors.pink, fontSize: 12, fontWeight: '700' },
   fieldRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   input: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600', outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
   placeCopy: { flex: 1 },

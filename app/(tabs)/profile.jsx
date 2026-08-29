@@ -1,25 +1,70 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Bell, Building2, ChevronRight, LockKeyhole, LogOut, MapPin, Pencil, PhoneCall, Settings, ShieldCheck, UserRound } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Bell, Building2, Camera, ChevronRight, LockKeyhole, LogOut, MapPin, Pencil, PhoneCall, Settings, ShieldCheck, UserRound } from 'lucide-react-native';
 import { useAuth } from '../../lib/auth';
 import { Card, colors, Header, Pill, Screen, SectionTitle } from '../../components/ui';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { profile, signOut } = useAuth();
+  const { profile, updateProfile, signOut } = useAuth();
   const isGov = profile?.account_type === 'government';
   const initial = (profile?.full_name || profile?.email || 'U').charAt(0).toUpperCase();
 
+  async function pickPhoto() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled) {
+      await updateProfile({ avatar_url: result.assets[0].uri });
+    }
+  }
+
   return (
     <Screen>
-      <Header eyebrow="Your SafeHer space" title={profile?.full_name || 'Your profile'} action={<View style={s.avatar}><Text style={s.avatarText}>{initial}</Text></View>} />
+      <Header
+        eyebrow="Your SafeHer space"
+        title={profile?.full_name || 'Your profile'}
+        action={
+          <Pressable onPress={pickPhoto} style={s.avatarHeaderBtn}>
+            {profile?.avatar_url ? (
+              <Image source={{ uri: profile.avatar_url }} style={s.avatarHeaderImg} />
+            ) : (
+              <View style={s.avatar}><Text style={s.avatarText}>{initial}</Text></View>
+            )}
+          </Pressable>
+        }
+      />
 
       <Card style={s.profile}>
-        <View style={s.profileAvatar}>{isGov ? <Building2 color={colors.teal} size={28} /> : <UserRound color={colors.teal} size={28} />}</View>
+        <Pressable onPress={pickPhoto} style={s.avatarCardWrapper}>
+          {profile?.avatar_url ? (
+            <Image source={{ uri: profile.avatar_url }} style={s.profileAvatarImg} />
+          ) : (
+            <View style={s.profileAvatar}>
+              {isGov ? (
+                <Building2 color={colors.teal} size={28} />
+              ) : (
+                <UserRound color={colors.teal} size={28} />
+              )}
+            </View>
+          )}
+          <View style={s.cameraBadge}>
+            <Camera color={colors.white} size={12} />
+          </View>
+        </Pressable>
+
         <View style={{ flex: 1 }}>
           <Text style={s.name}>{profile?.full_name || 'SafeHer member'}</Text>
           <Text style={s.email}>{profile?.email}</Text>
+          <Pressable onPress={pickPhoto} style={s.changePhotoBtn}>
+            <Text style={s.changePhotoText}>{profile?.avatar_url ? 'Change photo' : 'Add photo'}</Text>
+          </Pressable>
         </View>
+
         <Pill tone={isGov ? 'orange' : 'teal'}>{isGov ? 'Government' : 'Protected'}</Pill>
       </Card>
 
@@ -91,12 +136,19 @@ function DetailRow({ icon, label, value }) {
 }
 
 const s = StyleSheet.create({
+  avatarHeaderBtn: { borderRadius: 15, overflow: 'hidden' },
+  avatarHeaderImg: { width: 44, height: 44, borderRadius: 15, borderWidth: 1.5, borderColor: colors.teal },
   avatar: { width: 44, height: 44, borderRadius: 15, backgroundColor: colors.teal, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: colors.white, fontSize: 18, fontWeight: '800' },
-  profile: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  profileAvatar: { width: 52, height: 52, borderRadius: 18, backgroundColor: colors.tealSoft, alignItems: 'center', justifyContent: 'center' },
-  name: { color: colors.ink, fontSize: 17, fontWeight: '800', marginBottom: 5 },
+  profile: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatarCardWrapper: { position: 'relative' },
+  profileAvatarImg: { width: 56, height: 56, borderRadius: 20, borderWidth: 2, borderColor: colors.teal },
+  profileAvatar: { width: 56, height: 56, borderRadius: 20, backgroundColor: colors.tealSoft, alignItems: 'center', justifyContent: 'center' },
+  cameraBadge: { position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 8, backgroundColor: colors.teal, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.white },
+  name: { color: colors.ink, fontSize: 17, fontWeight: '800', marginBottom: 2 },
   email: { color: colors.muted, fontSize: 12 },
+  changePhotoBtn: { marginTop: 4 },
+  changePhotoText: { color: colors.teal, fontSize: 12, fontWeight: '800' },
   editBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, marginBottom: 20 },
   pressed: { opacity: 0.7 },
   editText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '800' },
