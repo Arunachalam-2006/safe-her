@@ -3,11 +3,12 @@ import { router, Stack, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 import { AuthProvider, useAuth } from '../lib/auth';
+import { ThemeProvider, useTheme } from '../lib/theme';
 import { useFrameworkReady } from '../hooks/useFrameworkReady';
-import { colors } from '../components/ui';
 
 function RootNavigator() {
   const { session, profile, loading } = useAuth();
+  const { colors, isDark } = useTheme();
   const segments = useSegments();
 
   useEffect(() => {
@@ -30,7 +31,7 @@ function RootNavigator() {
   if (loading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paper }}>
-        <ActivityIndicator size="large" color={colors.teal} />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -44,7 +45,7 @@ function RootNavigator() {
         <Stack.Screen name="edit-profile" />
         <Stack.Screen name="+not-found" />
       </Stack>
-      <StatusBar style="dark" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
     </>
   );
 }
@@ -53,8 +54,11 @@ export default function RootLayout() {
   useFrameworkReady();
 
   return (
-    <AuthProvider>
-      <RootNavigator />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <RootNavigator />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
+

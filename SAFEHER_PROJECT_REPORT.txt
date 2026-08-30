@@ -1,0 +1,132 @@
+================================================================================
+                        SAFEHER PLATFORM - PROJECT REPORT
+================================================================================
+Generated Date : August 30, 2026
+Project Name   : SafeHer (SafeTransit AI for Women & Citizens)
+Technology     : React Native, Expo Router, Lucide Icons, Supabase, Nominatim/OSRM
+Operating System: Cross-platform (iOS, Android, Web)
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+SafeHer is a state-of-the-art mobile and web application designed to empower 
+women and citizens with real-time safety insights, AI-assisted transit routing, 
+live journey tracking, emergency SOS dispatching, and community-driven hazard 
+reporting. 
+
+The application offers a modern, high-contrast user interface with dual dynamic 
+themes ("Blossom Luxe" light mode and "Midnight Shield" obsidian dark mode), 
+delivering maximum readability, stealth, and convenience during both daytime 
+and nighttime transit.
+
+--------------------------------------------------------------------------------
+2. TECHNICAL ARCHITECTURE & STACK
+--------------------------------------------------------------------------------
+- Framework          : React Native (Expo SDK)
+- Routing            : Expo Router v3 (File-based router)
+- Styling & Themes   : Dynamic Theme Context System (Custom design tokens)
+- Iconography        : Lucide React Native
+- Navigation         : Tab Bar Navigation + Modal Drawers + Stack Navigation
+- Backend & Auth     : Supabase Auth & PostgreSQL Database + Local Storage Fallback
+- Location Services  : Expo Location + Nominatim Reverse Geocoding + Live GPS Tracking
+- Image Management   : Expo Image Picker (Avatar uploads & hazard photo attachments)
+
+--------------------------------------------------------------------------------
+3. CORE MODULES & FEATURE BREAKDOWN
+--------------------------------------------------------------------------------
+
+[A] DYNAMIC THEME SYSTEM (lib/theme.jsx)
+  - Features:
+    * Blossom Luxe (Light Theme) : Warm violet, magenta, and soft lavender palette.
+    * Midnight Shield (Dark Theme): Obsidian black (#0D1117) with high-contrast neon cyan (#2DD4BF).
+    * Global Context Provider    : Controls background, card surfaces, borders, text, and active icon tints.
+    * State Persistence          : Remembers user preference across app sessions via localStorage/AsyncStorage.
+    * Accessibility              : Complies with WCAG contrast standards for outdoor daylight and dark night navigation.
+
+[B] CITIZEN HOME & SAFETY INDEX (app/(tabs)/index.jsx)
+  - Features:
+    * Time-Aware Header          : Automatically detects current hour to display "Daylight Monitoring" or "Night Mode Active".
+    * Live Safety Index          : Dynamic safety score badge (e.g., 94 High Safety vs 82 Moderate Night Safety).
+    * Smart Emergency SOS        : Prominent SOS button with live broadcasting indicator linked to Emergency Contact.
+    * SOS Confirmation Modal     : Prevents accidental triggers while providing direct dial for Women's Helpline (112).
+    * Safety Around You          : Displays current geocoded neighborhood, nearest police station, and streetlight status.
+    * Quick Safety Action Grid   : Flattened tile links for Plan Safe Route, Report Hazard, Companion Escort, and Safe Hubs.
+    * Safety Alerts Drawer       : Slide-up notification panel detailing active police patrols and maintenance logs.
+
+[C] AI ROUTE FINDER (app/(tabs)/routes.jsx)
+  - Features:
+    * Real-Time Search           : Live Nominatim geocoding autocomplete search for start and destination locations.
+    * Multi-Modal Transit        : Select between Driving, Walking, and Cycling routes.
+    * Integrated Map View        : Visualizes source, destination, and calculated paths.
+    * Distance & ETA Calculation : Provides precise distance (km) and travel duration with traffic delay indicators.
+    * Safety Optimization        : Filters paths to recommend well-lit and high-community-presence streets.
+
+[D] LIVE JOURNEY MONITORING (app/(tabs)/journey.jsx)
+  - Features:
+    * GPS Tracking Engine        : Live location polling with GPS accuracy feedback.
+    * Arrival Progress           : Visual progress bar calculating remaining distance and percentage completed.
+    * Travel Timeline            : Milestones including "Live tracking active", "Midpoint safety reassessment", and "Arrival".
+    * Emergency Support Quick-Dial: One-tap Smart SOS location sharing and direct police hotline dialing.
+
+[E] COMMUNITY HAZARD REPORTING (app/(tabs)/report.jsx)
+  - Features:
+    * Category Chips             : Pre-defined incident tags ("Poor lighting", "Harassment", "Theft", "Broken CCTV", "Unsafe stop").
+    * Photo Attachments          : Integrated camera/gallery picker to attach visual evidence.
+    * Anonymous Submissions      : Strips personal metadata to protect reporter privacy while updating neighborhood safety scores.
+
+[F] PROFILE & USER PREFERENCES (app/(tabs)/profile.jsx)
+  - Features:
+    * Big View Lightbox          : Tapping profile picture launches an enlarged 220px modal view with options to Change or Remove photo.
+    * App Settings Modal         : Accessed via Preferences > App Settings to seamlessly switch between Blossom Luxe & Midnight Shield themes.
+    * Account Management         : Displays account status (Citizen / Government Official), saved places (Home/Work), and linked emergency contacts.
+
+[G] AUTHENTICATION & MULTI-ROLE ACCESS (app/auth.jsx)
+  - Features:
+    * Dual Account Types         : Supports both Citizen users and Government/Police Officials.
+    * Agency Verification        : Government signups capture official agency titles (e.g., Chennai City Police).
+
+--------------------------------------------------------------------------------
+4. PROJECT DIRECTORY STRUCTURE
+--------------------------------------------------------------------------------
+project/
+├── app/
+│   ├── (tabs)/
+│   │   ├── _layout.jsx          # Dynamic Tab Bar Navigation Layout
+│   │   ├── index.jsx            # Citizen Home Screen & SOS Engine
+│   │   ├── routes.jsx           # AI Route Finder & Map Screen
+│   │   ├── journey.jsx          # Live Journey Monitoring Screen
+│   │   ├── report.jsx           # Hazard Reporting Screen
+│   │   └── profile.jsx          # User Profile, Photo Lightbox & App Settings
+│   ├── _layout.jsx              # Application Root Layout & Theme Provider Wrap
+│   ├── auth.jsx                 # Authentication (Sign in / Create account)
+│   └── edit-profile.jsx         # Profile Edit Screen
+├── components/
+│   ├── RouteMap.jsx             # Interactive Route Map Component
+│   ├── safetyScore.jsx          # Dynamic Safety Score Gauge Component
+│   └── ui.jsx                   # Theme-Aware UI Kit (Screen, Header, Card, Pill, ActionRow)
+├── lib/
+│   ├── auth.jsx                 # Supabase Authentication Context
+│   ├── theme.jsx                # Global Theme Provider & Design Tokens
+│   ├── location.jsx             # Location Services, Distance Math & Geocoding
+│   └── localReports.jsx         # Community Report Storage Manager
+├── assets/                      # Application Logos, Icons & Static Images
+├── app.json                     # Expo Configuration
+└── package.json                 # Project Dependencies & Scripts
+
+--------------------------------------------------------------------------------
+5. SECURITY & PRIVACY CONTROLS
+--------------------------------------------------------------------------------
+1. Zero Identity Exposure   : Community incident reports are stored without personal identifiers.
+2. Emergency Data Access    : Live GPS coordinates are shared exclusively when Smart SOS is actively triggered.
+3. Encrypted Credentials    : Auth handling powered by Supabase Auth with JWT token management.
+
+--------------------------------------------------------------------------------
+6. FUTURE ROADMAP & UPCOMING ENHANCEMENTS
+--------------------------------------------------------------------------------
+- Offline Map Caching       : Allow route visualization in low-connectivity underground transit.
+- Wearable SOS Trigger      : Bluetooth integration for smartwatch / panic button triggers.
+- Live Police Dispatch API   : Automated webhook connection to city emergency control rooms.
+
+================================================================================
+                       END OF SAFEHER PROJECT REPORT
+================================================================================

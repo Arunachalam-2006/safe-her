@@ -1,17 +1,28 @@
 import { Tabs } from 'expo-router';
 import { Home, Map, MessageSquareWarning, Route, UserRound } from 'lucide-react-native';
-
-const colors = { ink: '#12233F', teal: '#007F7B', muted: '#768196' };
+import { useTheme } from '../../lib/theme';
 
 export default function TabLayout() {
+  const { colors, isDark } = useTheme();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.teal,
+        tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.muted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', paddingBottom: 4 },
-        tabBarStyle: { height: 68, paddingTop: 8, borderTopColor: '#E7ECF2', backgroundColor: '#FFFFFF' },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', paddingBottom: 4 },
+        tabBarStyle: { 
+          height: 68, 
+          paddingTop: 8, 
+          borderTopColor: colors.line, 
+          backgroundColor: colors.tabBarBg,
+          elevation: 10,
+          shadowColor: colors.cardShadow,
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: isDark ? 0.4 : 0.08,
+          shadowRadius: 10,
+        },
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Home color={color} size={size} /> }} />
