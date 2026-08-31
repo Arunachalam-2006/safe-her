@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 import { AuthProvider, useAuth } from '../lib/auth';
 import { ThemeProvider, useTheme } from '../lib/theme';
+import { JourneyProvider } from '../lib/journey';
 import { useFrameworkReady } from '../hooks/useFrameworkReady';
 
 function RootNavigator() {
@@ -56,7 +57,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <RootNavigator />
+        <JourneyProvider>
+          <RootNavigator />
+        </JourneyProvider>
       </AuthProvider>
     </ThemeProvider>
   );

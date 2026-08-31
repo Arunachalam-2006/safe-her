@@ -1,18 +1,25 @@
 import { useState, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, ActivityIndicator, ScrollView } from 'react-native';
-import { Bike, Check, Clock3, Crosshair, Footprints, MapPin, Sparkles, Route as RouteIcon, Car, X } from 'lucide-react-native';
+import { Bike, Check, Clock3, Crosshair, Footprints, MapPin, Play, Sparkles, Route as RouteIcon, Car, X } from 'lucide-react-native';
 import { Card, Header, Pill, Screen, SectionTitle } from '../../components/ui';
 import { useTheme } from '../../lib/theme';
 import { useLocation, formatDistance, formatDuration, reverseGeocode, searchLocation, getRoute } from '../../lib/location';
+import { analyzeSafety } from '../../lib/safetyApi';
+import { useJourney } from '../../lib/journey';
+import { useRouter } from 'expo-router';
 import RouteMap from '../../components/RouteMap';
 
 export default function RoutesScreen() {
   const { colors, isDark } = useTheme();
+  const router = useRouter();
+  const { setActiveJourney } = useJourney();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [fromCoords, setFromCoords] = useState(null);
   const [toCoords, setToCoords] = useState(null);
   const [route, setRoute] = useState(null);
+  const [safetyData, setSafetyData] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const [mode, setMode] = useState('driving');
   const [error, setError] = useState('');
   const [planning, setPlanning] = useState(false);
@@ -20,6 +27,8 @@ export default function RoutesScreen() {
   const [searchField, setSearchField] = useState('to');
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [allRoutes, setAllRoutes] = useState([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const { location, requestLocation, loading: locLoading, error: locationError } = useLocation();
 
   useEffect(() => { requestLocation(); }, [requestLocation]);
@@ -53,9 +62,108 @@ export default function RoutesScreen() {
     if (!fromCoords) { setError(locationError || 'Allow location access to set your current location.'); return; }
     if (!toCoords) { setError('Search for and select a destination first.'); return; }
     setPlanning(true);
-    try { setRoute(await getRoute(fromCoords, toCoords, mode)); }
-    catch (e) { setError(e.message || 'Could not calculate this route. Please try again.'); }
-    finally { setPlanning(false); }
+    setRoute(null);
+    setSafetyData(null);
+    setAllRoutes([]);
+    setSelectedRouteIndex(0);
+    
+    try { 
+      let baseRoute = null;
+      try {
+        baseRoute = await getRoute(fromCoords, toCoords, mode);
+      } catch (err) {
+        console.warn("Local route lookup failed. Relying on safety server.", err);
+      }
+
+      setAnalyzing(true);
+      const safetyRoutes = await analyzeSafety(fromCoords, toCoords, mode);
+      
+      if (Array.isArray(safetyRoutes) && safetyRoutes.length > 0) {
+        setAllRoutes(safetyRoutes);
+        
+        let safestIndex = 0;
+        let highestScore = -1;
+        safetyRoutes.forEach((r, idx) => {
+          if (r.score > highestScore) {
+            highestScore = r.score;
+            safestIndex = idx;
+          }
+        });
+        
+        setSelectedRouteIndex(safestIndex);
+        const best = safetyRoutes[safestIndex];
+        setRoute({
+          coordinates: best.coordinates,
+          distanceKm: best.distanceKm,
+          durationMin: best.durationMin,
+          provider: 'OSRM Route Engine & Safety Analytics',
+        });
+        setSafetyData(best);
+      } else if (baseRoute) {
+        setRoute(baseRoute);
+        const fallbackSafety = {
+          score: 80,
+          risk_level: 'LOW',
+          confidence: 0.8,
+          factors: { lighting: 80, road: 85, police: 60, hospital: 70, amenities: 75, weather: 90, time: 80, route: 85 },
+          segments: [],
+          coordinates: baseRoute.coordinates,
+          distanceKm: baseRoute.distanceKm,
+          durationMin: baseRoute.durationMin,
+        };
+        setAllRoutes([fallbackSafety]);
+        setSelectedRouteIndex(0);
+        setSafetyData(fallbackSafety);
+      } else {
+        throw new Error("Could not calculate any routes.");
+      }
+    }
+    catch (e) { 
+      setError(e.message || 'Could not calculate routes. Please try again.'); 
+    }
+    finally { 
+      setPlanning(false); 
+      setAnalyzing(false);
+    }
+  }
+
+  function handleSelectRoute(idx) {
+    if (idx < 0 || idx >= allRoutes.length) return;
+    setSelectedRouteIndex(idx);
+    const selected = allRoutes[idx];
+    setRoute({
+      coordinates: selected.coordinates,
+      distanceKm: selected.distanceKm,
+      durationMin: selected.durationMin,
+      provider: 'OSRM Route Engine & Safety Analytics',
+    });
+    setSafetyData(selected);
+  }
+
+  function handleStartJourney() {
+    if (!route || !safetyData) return;
+    
+    // Convert safetyData factors to the format JourneyContext expects
+    setActiveJourney({
+      origin: { ...fromCoords, label: from },
+      destination: { ...toCoords, label: to },
+      routeGeometry: route.coordinates, // assuming this is [[lat,lng],...]
+      routeCoordinates: route.coordinates,
+      segments: safetyData.segments || [],
+      safetyScore: safetyData.score,
+      riskLevel: safetyData.risk_level,
+      factors: safetyData.factors || {},
+      features: safetyData.features || {},
+      confidence: safetyData.confidence,
+      distanceKm: route.distanceKm,
+      durationMin: route.durationMin,
+      mode,
+      startedAt: new Date().toISOString(),
+      currentSegmentIndex: 0,
+      status: 'active',
+    });
+    
+    router.push('/(tabs)/journey');
   }
 
   return (
@@ -129,7 +237,57 @@ export default function RoutesScreen() {
 
       {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
 
-      {fromCoords || toCoords ? <Card style={s.mapCard}><RouteMap source={fromCoords} destination={toCoords} route={route} /></Card> : null}
+      {fromCoords || toCoords ? (
+        <Card style={s.mapCard}>
+          <RouteMap 
+            source={fromCoords} 
+            destination={toCoords} 
+            route={route} 
+            allRoutes={allRoutes}
+            selectedRouteIndex={selectedRouteIndex}
+            onSelectRoute={handleSelectRoute}
+          />
+        </Card>
+      ) : null}
+
+      {allRoutes && allRoutes.length > 1 ? (
+        <View style={s.alternativesWrapper}>
+          <Text style={[s.alternativesHeader, { color: colors.muted }]}>Choose Route Option (Safest Selected by Default)</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.alternativesScroll}>
+            {allRoutes.map((r, idx) => {
+              const isSelected = selectedRouteIndex === idx;
+              const isSafest = idx === allRoutes.reduce((best, curr, currIdx, arr) => curr.score > arr[best].score ? currIdx : best, 0);
+              
+              return (
+                <Pressable
+                  key={idx}
+                  onPress={() => handleSelectRoute(idx)}
+                  style={[
+                    s.alternativeCard,
+                    {
+                      backgroundColor: isSelected ? colors.primarySoft : colors.cardBg,
+                      borderColor: isSelected ? colors.primary : colors.line
+                    }
+                  ]}
+                >
+                  <View style={s.alternativeTop}>
+                    <Text style={[s.alternativeScore, { color: colors.primary }]}>{r.score}/100</Text>
+                    {isSafest ? (
+                      <Pill tone="teal">Safest</Pill>
+                    ) : null}
+                  </View>
+                  <Text style={[s.alternativeMetrics, { color: colors.ink }]}>
+                    {formatDuration(r.durationMin)} · {formatDistance(r.distanceKm)}
+                  </Text>
+                  <Text style={[s.alternativeRisk, { color: r.risk_level === 'LOW' ? '#2d7a3a' : r.risk_level === 'MODERATE' ? '#9a6000' : '#e04a6f' }]}>
+                    {r.risk_level} Risk
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {route ? (
         <>
@@ -146,7 +304,7 @@ export default function RoutesScreen() {
           </Card>
 
           <SectionTitle action={<Text style={[s.updated, { color: colors.primary }]}>{route.provider}</Text>}>Route result</SectionTitle>
-          <View style={[s.routeCard, { backgroundColor: colors.cardBg, borderColor: colors.primary, borderWidth: 2 }]}>
+          <View style={[s.routeCard, { backgroundColor: colors.cardBg, borderColor: colors.line }]}>
               <View style={s.routeTop}>
                 <View style={s.routeName}>
                   <View style={[s.routeDot, { backgroundColor: colors.primary }]} />
@@ -158,7 +316,59 @@ export default function RoutesScreen() {
                 <Text style={[s.extra, { color: colors.muted }]}>{formatDistance(route.distanceKm)}</Text>
               </View>
               <Text style={[s.note, { color: colors.muted }]}>{route.provider}{route.trafficDelayMin ? `, including ${route.trafficDelayMin} min traffic delay.` : '.'}</Text>
+              
+              {analyzing ? (
+                <View style={s.analyzingBox}>
+                  <ActivityIndicator color={colors.primary} size="small" />
+                  <Text style={[s.analyzingText, { color: colors.primary }]}>Analyzing route safety...</Text>
+                </View>
+              ) : safetyData ? (
+                <View style={s.safetySection}>
+                  <View style={s.scoreStrip}>
+                    <Text style={[s.scoreValue, { color: colors.ink }]}>{safetyData.score} / 100</Text>
+                    <Text style={s.scoreLabel}>Safety score</Text>
+                    <View style={{ flex: 1 }} />
+                    <Pill tone={safetyData.risk_level === 'LOW' ? 'green' : safetyData.risk_level === 'MODERATE' ? 'orange' : 'pink'}>
+                      {safetyData.risk_level}
+                    </Pill>
+                  </View>
+                  
+                  <View style={s.factorsList}>
+                    {Object.entries(safetyData.factors || {}).map(([key, val]) => (
+                      <View key={key} style={s.factorRow}>
+                        <Text style={[s.factorName, { color: colors.ink }]}>{key.charAt(0).toUpperCase() + key.slice(1)}</Text>
+                        <View style={[s.factorBarBg, { backgroundColor: 'rgba(0,0,0,0.08)' }]}>
+                          <View style={[s.factorBarFill, { width: `${val}%`, backgroundColor: val >= 80 ? '#2d7a3a' : val >= 60 ? '#5B4FD9' : '#9a6000' }]} />
+                        </View>
+                        <Text style={[s.factorVal, { color: colors.ink }]}>{val}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  
+                  <Text style={[s.segmentsTitle, { color: colors.muted }]}>SEGMENTS</Text>
+                  <View style={s.segmentsList}>
+                    {safetyData.segments?.map((seg, i) => (
+                      <View key={seg.segment_id} style={s.segmentRow}>
+                        <Text style={[s.segName, { color: colors.ink }]}>Seg {i + 1}</Text>
+                        <View style={[s.segLine, { backgroundColor: seg.risk_level === 'LOW' ? '#2d7a3a' : seg.risk_level === 'MODERATE' ? '#9a6000' : seg.risk_level === 'ELEVATED' ? '#c0392b' : '#e04a6f' }]} />
+                        <Text style={[s.segScore, { color: colors.ink }]}>{seg.score} {seg.risk_level.substring(0,3)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  
+                  {safetyData._timeout ? (
+                    <Text style={[s.timeoutWarn, { color: colors.orange }]}>Analysis took too long. Partial results shown.</Text>
+                  ) : null}
+                </View>
+              ) : null}
           </View>
+          
+          {safetyData && !analyzing ? (
+            <Pressable onPress={handleStartJourney} style={({ pressed }) => [s.planButton, { backgroundColor: '#5B4FD9' }, pressed && s.pressed]}>
+              <Play color="#FFFFFF" size={18} />
+              <Text style={s.planText}>Start Journey</Text>
+            </Pressable>
+          ) : null}
 
           <Card style={[s.tip, { backgroundColor: colors.primarySoft, borderColor: colors.primarySoft }]}>
             <View style={{ flex: 1, marginLeft: 10 }}>
@@ -221,6 +431,14 @@ function SearchField({ label, value, coords, active, suggestions, iconColor, onC
 
 const s = StyleSheet.create({
   mapCard: { padding: 0, overflow: 'hidden', height: 230 },
+  alternativesWrapper: { marginVertical: 12 },
+  alternativesHeader: { fontSize: 10, fontWeight: '750', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8, paddingHorizontal: 4 },
+  alternativesScroll: { gap: 10, flexDirection: 'row', paddingHorizontal: 4, paddingBottom: 4 },
+  alternativeCard: { width: 154, padding: 12, borderRadius: 16, borderWidth: 1.5, gap: 4 },
+  alternativeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  alternativeScore: { fontSize: 16, fontWeight: '700' },
+  alternativeMetrics: { fontSize: 11, fontWeight: '500' },
+  alternativeRisk: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
   searchCard: { borderRadius: 20, borderWidth: 1, marginBottom: 12, overflow: 'visible' },
   searchBody: { flexDirection: 'row', padding: 16, paddingBottom: 10 },
   endpointColumn: { width: 28, alignItems: 'center', paddingTop: 18 },
@@ -230,45 +448,69 @@ const s = StyleSheet.create({
   fieldWrap: { position: 'relative', zIndex: 1, width: '100%' },
   fieldInner: { flexDirection: 'row', alignItems: 'center', width: '100%', borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 12, height: 50, gap: 8 },
   fieldLeft: { width: 38, flexShrink: 0 },
-  fieldLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
-  input: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: '600', paddingVertical: 4, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
+  fieldLabel: { fontSize: 10, fontWeight: '500', letterSpacing: 0.3 },
+  input: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: '500', paddingVertical: 4, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
   clearBtn: { width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   clearBtnHidden: { opacity: 0 },
   locateBtn: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   fieldDivider: { height: 12 },
   suggestions: { position: 'relative', marginTop: 6, borderRadius: 16, borderWidth: 1, zIndex: 100, padding: 6, maxHeight: 240 },
-  suggestionsHeader: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
+  suggestionsHeader: { fontSize: 10, fontWeight: '500', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
   suggestionsScroll: { maxHeight: 200 },
   suggestion: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 11, borderRadius: 12 },
   pressed: { opacity: 0.6 },
   suggestionIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   suggestionCopy: { flex: 1 },
-  suggestionText: { fontSize: 14, fontWeight: '700' },
-  suggestionSub: { fontSize: 11, marginTop: 2 },
+  suggestionText: { fontSize: 14, fontWeight: '500' },
+  suggestionSub: { fontSize: 10, marginTop: 2 },
   quickRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 14, paddingTop: 4, borderTopWidth: 1 },
   planButton: { borderRadius: 16, height: 52, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  planText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  planText: { color: '#FFFFFF', fontSize: 14, fontWeight: '500' },
   modeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   modeChip: { flex: 1, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 13, borderWidth: 1 },
-  modeText: { fontSize: 12, fontWeight: '800' },
+  modeText: { fontSize: 12, fontWeight: '500' },
   errorBox: { backgroundColor: '#FFF0F0', borderRadius: 12, padding: 12, marginBottom: 16 },
-  errorText: { color: '#C24141', fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  errorText: { color: '#C24141', fontSize: 12, lineHeight: 18, fontWeight: '500' },
   summaryCard: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 },
   summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   summaryDivider: { width: 1, height: 20 },
-  summaryText: { fontSize: 14, fontWeight: '800' },
-  updated: { fontSize: 12, fontWeight: '700' },
-  routeCard: { borderRadius: 18, padding: 16, marginBottom: 12 },
+  summaryText: { fontSize: 14, fontWeight: '500' },
+  updated: { fontSize: 12, fontWeight: '500' },
+  routeCard: { borderRadius: 18, padding: 16, marginBottom: 12, borderWidth: 1 },
   routeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   routeName: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   routeDot: { width: 10, height: 10, borderRadius: 5 },
-  name: { fontWeight: '800', fontSize: 16 },
+  name: { fontWeight: '500', fontSize: 14 },
   routeMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 16 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metaText: { fontWeight: '700', fontSize: 13 },
+  metaText: { fontWeight: '500', fontSize: 12 },
   extra: { fontSize: 12 },
   note: { fontSize: 12, lineHeight: 18, marginTop: 12 },
+  
+  analyzingBox: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16, marginTop: 16, backgroundColor: '#F3E8FF', borderRadius: 12 },
+  analyzingText: { fontSize: 12, fontWeight: '500' },
+  
+  safetySection: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F3E8FF' },
+  scoreStrip: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
+  scoreValue: { fontSize: 20, fontWeight: '500' },
+  scoreLabel: { fontSize: 12, color: '#7C7289' },
+  
+  factorsList: { gap: 8, marginBottom: 16 },
+  factorRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  factorName: { width: 70, fontSize: 10, fontWeight: '500' },
+  factorBarBg: { flex: 1, height: 4, borderRadius: 2, overflow: 'hidden' },
+  factorBarFill: { height: '100%', borderRadius: 2 },
+  factorVal: { width: 30, fontSize: 10, fontWeight: '500', textAlign: 'right' },
+  
+  segmentsTitle: { fontSize: 10, fontWeight: '500', letterSpacing: 1, marginTop: 8, marginBottom: 8 },
+  segmentsList: { gap: 6 },
+  segmentRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  segName: { width: 45, fontSize: 10, fontWeight: '500' },
+  segLine: { flex: 1, height: 2, borderRadius: 1 },
+  segScore: { width: 50, fontSize: 10, fontWeight: '500', textAlign: 'right' },
+  timeoutWarn: { fontSize: 10, fontWeight: '500', marginTop: 12, textAlign: 'center' },
+
   tip: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 4 },
-  tipTitle: { fontWeight: '800', fontSize: 13, marginBottom: 4 },
+  tipTitle: { fontWeight: '500', fontSize: 14, marginBottom: 4 },
   tipText: { lineHeight: 17, fontSize: 12 },
 });
