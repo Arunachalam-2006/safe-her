@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes.safety import router as safety_router
+from routes.spot_safety import router as spot_router
 
 app = FastAPI(
     title="SafeHer Safety Engine",
@@ -24,6 +25,7 @@ app.add_middleware(
 )
 
 app.include_router(safety_router)
+app.include_router(spot_router)
 
 
 @app.get("/")
@@ -31,7 +33,7 @@ async def root():
     return {
         "service": "SafeHer Safety Engine",
         "version": "1.0.0",
-        "endpoints": ["/safety/analyze"],
+        "endpoints": ["/safety/analyze", "/safety/spot"],
     }
 
 

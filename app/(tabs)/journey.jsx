@@ -10,6 +10,7 @@ import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { useLiveLocation, haversineDistance, formatDistance, formatDuration } from '../../lib/location';
 import { useJourney } from '../../lib/journey';
+import { SOS_STATUS, useSOS } from '../../lib/sos';
 import NavigationMap from '../../components/NavigationMap';
 
 /* ═══════════════════════════════════════════════════════════
@@ -32,6 +33,7 @@ export default function JourneyScreen() {
   const { colors, isDark } = useTheme();
   const { location, error: locError, tracking, startTracking, stopTracking } = useLiveLocation();
   const { activeJourney, setActiveJourney, updateCurrentSegment, clearJourney } = useJourney();
+  const { status: sosStatus, requestSOS } = useSOS();
 
   const [remainingKm, setRemainingKm] = useState(null);
   const [etaMin, setEtaMin] = useState(null);
@@ -130,15 +132,9 @@ export default function JourneyScreen() {
   }
 
   function handleSOS() {
-    const payload = {
-      location: location ? { lat: location.lat, lng: location.lng } : null,
-      destination: activeJourney.destination,
-      safetyScore: activeJourney.safetyScore,
-      eta: etaMin,
-      mapsLink: location ? `https://maps.google.com/?q=${location.lat},${location.lng}` : '',
-    };
-    console.log('🚨 SOS triggered:', payload);
-    // Hook into share / SMS when integrated
+    if (sosStatus !== SOS_STATUS.ACTIVE && sosStatus !== SOS_STATUS.ACTIVATING) {
+      requestSOS();
+    }
   }
 
   const status = activeJourney.status;
@@ -312,10 +308,12 @@ export default function JourneyScreen() {
         <View style={s.actionRow}>
           <Pressable
             onPress={handleSOS}
-            style={({ pressed }) => [s.actionBtn, { backgroundColor: '#EA4335' }, pressed && s.pressed]}
+            style={({ pressed }) => [s.actionBtn, { backgroundColor: sosStatus === SOS_STATUS.ACTIVE ? '#C1121F' : '#EA4335' }, pressed && s.pressed]}
           >
             <ShieldAlert color="#fff" size={18} />
-            <Text style={s.actionBtnText}>SOS</Text>
+            <Text style={s.actionBtnText}>
+              {sosStatus === SOS_STATUS.ACTIVE ? 'SOS ON' : 'SOS'}
+            </Text>
           </Pressable>
 
           <Pressable

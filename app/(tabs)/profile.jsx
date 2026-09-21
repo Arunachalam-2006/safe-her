@@ -20,16 +20,19 @@ import {
   Sun,
   CheckCircle2,
   Trash2,
-  X
+  X,
+  UsersRound,
 } from 'lucide-react-native';
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { Card, Header, Pill, Screen, SectionTitle } from '../../components/ui';
+import { useSOS } from '../../lib/sos';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { profile, updateProfile, signOut } = useAuth();
   const { colors, themeName, setThemeName, isDark } = useTheme();
+  const { contactCount } = useSOS();
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   
@@ -147,6 +150,12 @@ export default function ProfileScreen() {
       {/* Preferences Section */}
       <SectionTitle>Preferences</SectionTitle>
       <Card>
+        <Setting
+          icon={<UsersRound color={colors.pink} size={19} />}
+          title="Emergency Contacts"
+          detail={contactCount > 0 ? `${contactCount} contact${contactCount === 1 ? '' : 's'} saved` : 'Add trusted contacts for SOS alerts'}
+          onPress={() => router.push('/emergency-contacts')}
+        />
         <Setting icon={<Bell color={colors.primary} size={19} />} title="Safety alerts" detail="Get notified about new route risks" />
         <Setting icon={<LockKeyhole color={colors.orange} size={19} />} title="Privacy controls" detail="Manage location and report settings" />
         <Setting 

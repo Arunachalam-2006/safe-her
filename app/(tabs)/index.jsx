@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'expo-router';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
@@ -16,25 +16,30 @@ import {
   Moon,
   ShieldCheck,
   Building2,
-  Phone
+  Phone,
 } from 'lucide-react-native';
 import { SafetyScore } from '../../components/safetyScore';
 import { ActionRow, Card, Header, Screen, SectionTitle } from '../../components/ui';
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { useLocation, reverseGeocode } from '../../lib/location';
+import { fetchSpotSafety } from '../../lib/safetyApi';
+import { SOS_STATUS, useSOS } from '../../lib/sos';
 
 export default function HomeScreen() {
   const { profile } = useAuth();
   const { colors, isDark } = useTheme();
+  const { status: sosStatus, contactCount, requestSOS } = useSOS();
   const firstName = (profile?.full_name || 'there').split(' ')[0];
+  const emergencyName = profile?.emergency_contact_name;
+  const emergencyPhone = profile?.emergency_contact_phone;
+  const emergencyDisplay = profile?.emergency_contact_name
+    ? `${profile.emergency_contact_name}${profile.emergency_contact_phone ? ` (${profile.emergency_contact_phone})` : ''}`
+    : null;
   const [currentArea, setCurrentArea] = useState('Locating...');
   const { location, requestLocation } = useLocation();
   
-  // Modals state
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showSosModal, setShowSosModal] = useState(false);
-  const [sosActive, setSosActive] = useState(false);
 
   // Time & Safety Context
   const currentHour = new Date().getHours();
@@ -42,9 +47,17 @@ export default function HomeScreen() {
   const timeGreeting = currentHour < 12 ? 'Good morning' : currentHour < 18 ? 'Good afternoon' : 'Good evening';
   const greeting = `${timeGreeting}, ${firstName}`;
   
-  // Calculate dynamic safety score based on time
-  const dynamicSafetyScore = isNightTime ? 82 : 94;
-  const safetyLabel = isNightTime ? 'Moderate Night Safety' : 'High Safety Zone';
+  // ── REAL Safety Score State ──────────────────────────────────────────
+  const [safetyData, setSafetyData] = useState(null);
+  const [safetyLoading, setSafetyLoading] = useState(true);
+  const lastFetchedRef = useRef(null); // prevent duplicate fetches for same location
+
+  // Fallback values (used until real data arrives)
+  const safetyScore = safetyData?.score ?? (isNightTime ? 82 : 94);
+  const safetyLabel = safetyData?.label ?? (isNightTime ? 'Moderate Night Safety' : 'High Safety Zone');
+  const safetyFactors = safetyData?.factors ?? null;
+  const safetyConfidence = safetyData?.confidence ?? null;
+  const isOffline = safetyData?._offline ?? false;
 
   useEffect(() => {
     requestLocation();
@@ -56,6 +69,29 @@ export default function HomeScreen() {
         setCurrentArea(name.split(',')[0] || 'Chennai Central');
       });
     }
+  }, [location]);
+
+  // ── Fetch spot safety when location becomes available ───────────────
+  useEffect(() => {
+    if (!location) return;
+    
+    // Deduplicate: don't re-fetch if coords haven't meaningfully changed
+    const coordKey = `${location.lat.toFixed(3)},${location.lng.toFixed(3)}`;
+    if (lastFetchedRef.current === coordKey) return;
+    lastFetchedRef.current = coordKey;
+
+    setSafetyLoading(true);
+    fetchSpotSafety(location.lat, location.lng)
+      .then((result) => {
+        setSafetyData(result);
+      })
+      .catch((err) => {
+        console.warn('Spot safety fetch failed:', err.message);
+        // safetyData stays null → component shows time-based fallback via defaults above
+      })
+      .finally(() => {
+        setSafetyLoading(false);
+      });
   }, [location]);
 
   return (
@@ -92,17 +128,28 @@ export default function HomeScreen() {
       </View>
       
       {/* Live Safety Score Card */}
-      <SafetyScore score={dynamicSafetyScore} label={safetyLabel} />
+      <SafetyScore
+        score={safetyScore}
+        label={safetyLabel}
+        factors={safetyFactors}
+        confidence={safetyConfidence}
+        loading={safetyLoading && !safetyData}
+        offline={isOffline}
+      />
       
       {/* Smart Emergency SOS Trigger Card */}
       <View style={styles.sosWrap}>
         <Pressable
-          onPress={() => setShowSosModal(true)}
+          onPress={() => {
+            if (sosStatus !== SOS_STATUS.ACTIVE && sosStatus !== SOS_STATUS.ACTIVATING) {
+              requestSOS();
+            }
+          }}
           style={({ pressed }) => [
             styles.sos, 
             { backgroundColor: colors.sosBg, borderColor: colors.sosBorder },
             pressed && styles.pressed, 
-            sosActive && styles.sosTriggered
+            (sosStatus === SOS_STATUS.ACTIVE || sosStatus === SOS_STATUS.ACTIVATING) && styles.sosTriggered,
           ]}
         >
           <View style={styles.sosIcon}>
@@ -111,22 +158,35 @@ export default function HomeScreen() {
           <View style={styles.sosCopy}>
             <View style={styles.sosHeaderRow}>
               <Text style={styles.sosTitle}>
-                {sosActive ? '🚨 SOS Emergency Broadcasting' : 'Need Emergency Help?'}
+                {sosStatus === SOS_STATUS.ACTIVE ? '🚨 SOS Emergency Active' :
+                 sosStatus === SOS_STATUS.ACTIVATING ? 'Preparing SOS…' :
+                 'Need Emergency Help?'}
               </Text>
               <View style={styles.livePulse}>
-                <Radio color="#FFFFFF" size={12} />
-                <Text style={styles.liveText}>LIVE</Text>
+                {sosStatus === SOS_STATUS.ACTIVE ? (
+                  <><Radio color="#FFFFFF" size={12} /><Text style={styles.liveText}>ON</Text></>
+                ) : (
+                  <><ShieldAlert color="#FFFFFF" size={12} /><Text style={styles.liveText}>TAP</Text></>
+                )}
               </View>
             </View>
             <Text style={styles.sosSub}>
-              {sosActive
-                ? 'Sharing real-time coordinates with Emergency Contact & Police'
-                : 'Tap to trigger Smart SOS & share live journey with contacts'}
+              {sosStatus === SOS_STATUS.ACTIVE
+                ? 'Emergency session running. Open SOS panel to share alert and stop tracking.'
+                : sosStatus === SOS_STATUS.ACTIVATING
+                ? 'Requesting location and starting tracking…'
+                : 'Tap to start Smart SOS. You can cancel during the 3-second countdown.'}
             </Text>
             
             <View style={styles.emergencyChip}>
               <Phone color="#FFE7F0" size={11} />
-              <Text style={styles.emergencyChipText}>Emergency Contact Linked: Mom (+91 98765 43210)</Text>
+              <Text style={styles.emergencyChipText}>
+                {contactCount > 0
+                  ? `${contactCount} emergency contact${contactCount === 1 ? '' : 's'} ready`
+                  : emergencyDisplay
+                  ? `Profile contact: ${emergencyDisplay}`
+                  : '⚠ Add emergency contacts to get started'}
+              </Text>
             </View>
           </View>
           <ChevronRight color="#FFFFFF" size={20} />
@@ -254,46 +314,6 @@ export default function HomeScreen() {
                 </View>
               </View>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* SOS Trigger Confirmation Modal */}
-      <Modal visible={showSosModal} animationType="fade" transparent={true} onRequestClose={() => setShowSosModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.sosModalContent, { backgroundColor: colors.cardBg }]}>
-            <View style={[styles.sosModalBadge, { backgroundColor: colors.pink }]}>
-              <ShieldAlert color="#FFFFFF" size={36} />
-            </View>
-            
-            <Text style={[styles.sosModalTitle, { color: colors.ink }]}>Smart Emergency SOS</Text>
-            <Text style={[styles.sosModalSub, { color: colors.muted }]}>
-              This action will instantly share your live coordinates with your Emergency Contact (Mom) and trigger emergency dispatch protocols.
-            </Text>
-
-            <Pressable
-              onPress={() => {
-                setSosActive(true);
-                setShowSosModal(false);
-              }}
-              style={[styles.sosConfirmBtn, { backgroundColor: colors.pink }]}
-            >
-              <Text style={styles.sosConfirmText}>🚨 ACTIVATE SOS NOW</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => {
-                alert('Calling Emergency Helpline 112...');
-              }}
-              style={[styles.callHelplineBtn, { backgroundColor: colors.paper, borderColor: colors.line }]}
-            >
-              <PhoneCall color={colors.ink} size={18} />
-              <Text style={[styles.callHelplineText, { color: colors.ink }]}>Call Women's Helpline 112</Text>
-            </Pressable>
-
-            <Pressable onPress={() => setShowSosModal(false)} style={styles.cancelBtn}>
-              <Text style={[styles.cancelText, { color: colors.muted }]}>Cancel</Text>
-            </Pressable>
           </View>
         </View>
       </Modal>

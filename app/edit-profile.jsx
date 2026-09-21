@@ -4,12 +4,13 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { ArrowLeft, Check, Home, MapPin, Briefcase, Phone, UserRound, ShieldCheck, Navigation, Crosshair, Camera, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../lib/auth';
-import { colors } from '../components/ui';
+import { useTheme } from '../lib/theme';
 import { useLocation, haversineDistance, reverseGeocode } from '../lib/location';
 
 export default function EditProfileScreen() {
   const router = useRouter();
   const { profile, updateProfile } = useAuth();
+  const { colors, isDark } = useTheme();
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || null);
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [phone, setPhone] = useState(profile?.phone || '');
@@ -97,56 +98,56 @@ export default function EditProfileScreen() {
   const distance = homeLat && workLat ? haversineDistance(homeLat, homeLng, workLat, workLng) : null;
 
   return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.navBar}>
+    <SafeAreaView style={[s.safe, { backgroundColor: colors.paper }]}>
+      <View style={[s.navBar, { backgroundColor: colors.cardBg, borderBottomColor: colors.line }]}>
         <Pressable onPress={() => router.back()} style={s.backBtn}><ArrowLeft color={colors.ink} size={22} /></Pressable>
-        <Text style={s.navTitle}>Edit profile</Text>
+        <Text style={[s.navTitle, { color: colors.ink }]}>Edit profile</Text>
         <View style={s.backBtn} />
       </View>
       <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
-        <Text style={s.sectionLabel}>Profile photo</Text>
+        <Text style={[s.sectionLabel, { color: colors.muted }]}>Profile photo</Text>
         <Card style={s.avatarCard}>
           <View style={s.avatarWrapper}>
             {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={s.avatarImg} />
+              <Image source={{ uri: avatarUrl }} style={[s.avatarImg, { borderColor: colors.teal }]} />
             ) : (
-              <View style={s.avatarPlaceholder}>
-                <Text style={s.avatarInitials}>{initial}</Text>
+              <View style={[s.avatarPlaceholder, { backgroundColor: colors.tealSoft, borderColor: colors.line }]}>
+                <Text style={[s.avatarInitials, { color: colors.teal }]}>{initial}</Text>
               </View>
             )}
-            <Pressable onPress={pickPhoto} style={s.cameraBadge}>
-              <Camera color={colors.white} size={14} />
+            <Pressable onPress={pickPhoto} style={[s.cameraBadge, { backgroundColor: colors.teal, borderColor: colors.cardBg }]}>
+              <Camera color="#FFFFFF" size={14} />
             </Pressable>
           </View>
           <View style={s.avatarActions}>
-            <Pressable onPress={pickPhoto} style={({ pressed }) => [s.photoBtn, pressed && s.pressed]}>
+            <Pressable onPress={pickPhoto} style={({ pressed }) => [[s.photoBtn, { backgroundColor: colors.tealSoft }], pressed && s.pressed]}>
               <Camera color={colors.teal} size={16} />
-              <Text style={s.photoBtnText}>{avatarUrl ? 'Change photo' : 'Upload photo'}</Text>
+              <Text style={[s.photoBtnText, { color: colors.teal }]}>{avatarUrl ? 'Change photo' : 'Upload photo'}</Text>
             </Pressable>
             {avatarUrl ? (
               <Pressable onPress={removePhoto} style={({ pressed }) => [s.removeBtn, pressed && s.pressed]}>
                 <Trash2 color={colors.pink} size={16} />
-                <Text style={s.removeBtnText}>Remove</Text>
+                <Text style={[s.removeBtnText, { color: colors.pink }]}>Remove</Text>
               </Pressable>
             ) : null}
           </View>
         </Card>
 
-        <Text style={s.sectionLabel}>Personal details</Text>
+        <Text style={[s.sectionLabel, { color: colors.muted }]}>Personal details</Text>
         <Card>
-          <FieldRow icon={<UserRound color={colors.teal} size={18} />}><TextInput style={s.input} value={fullName} onChangeText={setFullName} placeholder="Full name" placeholderTextColor={colors.muted} /></FieldRow>
+          <FieldRow icon={<UserRound color={colors.teal} size={18} />}><TextInput style={[s.input, { color: colors.ink }]} value={fullName} onChangeText={setFullName} placeholder="Full name" placeholderTextColor={colors.muted} /></FieldRow>
           <Divider />
-          <FieldRow icon={<Phone color={colors.blue} size={18} />}><TextInput style={s.input} value={phone} onChangeText={setPhone} placeholder="Phone number" placeholderTextColor={colors.muted} keyboardType="phone-pad" /></FieldRow>
+          <FieldRow icon={<Phone color={colors.blue} size={18} />}><TextInput style={[s.input, { color: colors.ink }]} value={phone} onChangeText={setPhone} placeholder="Phone number" placeholderTextColor={colors.muted} keyboardType="phone-pad" /></FieldRow>
         </Card>
 
-        <Text style={s.sectionLabel}>Emergency contact</Text>
+        <Text style={[s.sectionLabel, { color: colors.muted }]}>Emergency contact</Text>
         <Card>
-          <FieldRow icon={<UserRound color={colors.pink} size={18} />}><TextInput style={s.input} value={emergencyName} onChangeText={setEmergencyName} placeholder="Contact name" placeholderTextColor={colors.muted} /></FieldRow>
+          <FieldRow icon={<UserRound color={colors.pink} size={18} />}><TextInput style={[s.input, { color: colors.ink }]} value={emergencyName} onChangeText={setEmergencyName} placeholder="Contact name" placeholderTextColor={colors.muted} /></FieldRow>
           <Divider />
-          <FieldRow icon={<Phone color={colors.pink} size={18} />}><TextInput style={s.input} value={emergencyPhone} onChangeText={setEmergencyPhone} placeholder="Contact phone" placeholderTextColor={colors.muted} keyboardType="phone-pad" /></FieldRow>
+          <FieldRow icon={<Phone color={colors.pink} size={18} />}><TextInput style={[s.input, { color: colors.ink }]} value={emergencyPhone} onChangeText={setEmergencyPhone} placeholder="Contact phone" placeholderTextColor={colors.muted} keyboardType="phone-pad" /></FieldRow>
         </Card>
 
-        <Text style={s.sectionLabel}>Saved places</Text>
+        <Text style={[s.sectionLabel, { color: colors.muted }]}>Saved places</Text>
         <Card>
           <PlaceRow icon={<Home color={colors.teal} size={18} />} label="Home" value={homeLabel} onPress={() => useCurrentLocation('home')} locating={locating === 'home'} />
           <Divider />
@@ -156,15 +157,15 @@ export default function EditProfileScreen() {
         {distance !== null ? (
           <View style={s.distanceBox}>
             <Navigation color={colors.teal} size={16} />
-            <Text style={s.distanceText}>Home to work: {distance.toFixed(1)} km straight-line</Text>
+            <Text style={[s.distanceText, { color: colors.teal }]}>Home to work: {distance.toFixed(1)} km straight-line</Text>
           </View>
         ) : null}
 
         {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
-        {success ? <View style={s.successBox}><Check color={colors.teal} size={18} /><Text style={s.successText}>Saved successfully</Text></View> : null}
+        {success ? <View style={[s.successBox, { backgroundColor: colors.tealSoft }]}><Check color={colors.teal} size={18} /><Text style={[s.successText, { color: colors.teal }]}>Saved successfully</Text></View> : null}
 
-        <Pressable disabled={saving} onPress={handleSave} style={({ pressed }) => [s.saveBtn, pressed && s.pressed]}>
-          {saving ? <ActivityIndicator color={colors.white} size="small" /> : <><Check color={colors.white} size={18} /><Text style={s.saveText}>Save changes</Text></>}
+        <Pressable disabled={saving} onPress={handleSave} style={({ pressed }) => [[s.saveBtn, { backgroundColor: colors.teal }], pressed && s.pressed]}>
+          {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <><Check color="#FFFFFF" size={18} /><Text style={s.saveText}>Save changes</Text></>}
         </Pressable>
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -173,7 +174,8 @@ export default function EditProfileScreen() {
 }
 
 function Card({ children, style }) {
-  return <View style={[s.card, style]}>{children}</View>;
+  const { colors } = useTheme();
+  return <View style={[{ backgroundColor: colors.cardBg, borderRadius: 18, padding: 4, borderWidth: 1, borderColor: colors.line, marginBottom: 16 }, style]}>{children}</View>;
 }
 
 function FieldRow({ icon, children }) {
@@ -181,14 +183,15 @@ function FieldRow({ icon, children }) {
 }
 
 function PlaceRow({ icon, label, value, onPress, locating }) {
+  const { colors } = useTheme();
   return (
     <View style={s.fieldRow}>
       {icon}
       <View style={s.placeCopy}>
-        <Text style={s.placeLabel}>{label}</Text>
-        <Text style={s.placeValue} numberOfLines={1}>{value || 'Not set — tap to add'}</Text>
+        <Text style={[s.placeLabel, { color: colors.muted }]}>{label}</Text>
+        <Text style={[s.placeValue, { color: colors.ink }]} numberOfLines={1}>{value || 'Not set — tap to add'}</Text>
       </View>
-      <Pressable onPress={onPress} style={s.locateBtn}>
+      <Pressable onPress={onPress} style={[s.locateBtn, { backgroundColor: colors.tealSoft }]}>
         {locating ? <ActivityIndicator color={colors.teal} size="small" /> : <Crosshair color={colors.teal} size={16} />}
       </Pressable>
     </View>
@@ -196,42 +199,42 @@ function PlaceRow({ icon, label, value, onPress, locating }) {
 }
 
 function Divider() {
-  return <View style={s.divider} />;
+  const { colors } = useTheme();
+  return <View style={[s.divider, { backgroundColor: colors.line }]} />;
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
-  navBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.line },
+  safe: { flex: 1 },
+  navBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
   backBtn: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  navTitle: { color: colors.ink, fontSize: 17, fontWeight: '800' },
+  navTitle: { fontSize: 17, fontWeight: '800' },
   content: { padding: 20, paddingBottom: 40 },
-  sectionLabel: { color: colors.muted, fontSize: 12, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10, marginTop: 4 },
-  card: { backgroundColor: colors.white, borderRadius: 18, padding: 4, borderWidth: 1, borderColor: colors.line, marginBottom: 16 },
+  sectionLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10, marginTop: 4 },
   avatarCard: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 16 },
   avatarWrapper: { position: 'relative' },
-  avatarImg: { width: 72, height: 72, borderRadius: 26, borderWidth: 2, borderColor: colors.teal },
-  avatarPlaceholder: { width: 72, height: 72, borderRadius: 26, backgroundColor: colors.tealSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.line },
-  avatarInitials: { color: colors.teal, fontSize: 26, fontWeight: '800' },
-  cameraBadge: { position: 'absolute', bottom: -2, right: -2, width: 26, height: 26, borderRadius: 10, backgroundColor: colors.teal, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.white },
+  avatarImg: { width: 72, height: 72, borderRadius: 26, borderWidth: 2 },
+  avatarPlaceholder: { width: 72, height: 72, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  avatarInitials: { fontSize: 26, fontWeight: '800' },
+  cameraBadge: { position: 'absolute', bottom: -2, right: -2, width: 26, height: 26, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   avatarActions: { flex: 1, gap: 8 },
-  photoBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.tealSoft, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, alignSelf: 'flex-start' },
-  photoBtnText: { color: colors.teal, fontSize: 13, fontWeight: '800' },
+  photoBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, alignSelf: 'flex-start' },
+  photoBtnText: { fontSize: 13, fontWeight: '800' },
   removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, alignSelf: 'flex-start' },
-  removeBtnText: { color: colors.pink, fontSize: 12, fontWeight: '700' },
+  removeBtnText: { fontSize: 12, fontWeight: '700' },
   fieldRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
-  input: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600', outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
+  input: { flex: 1, fontSize: 14, fontWeight: '600', outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' },
   placeCopy: { flex: 1 },
-  placeLabel: { color: colors.muted, fontSize: 11, fontWeight: '700', marginBottom: 3 },
-  placeValue: { color: colors.ink, fontSize: 14, fontWeight: '600' },
-  locateBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.tealSoft, alignItems: 'center', justifyContent: 'center' },
-  divider: { height: 1, backgroundColor: colors.line, marginLeft: 42 },
+  placeLabel: { fontSize: 11, fontWeight: '700', marginBottom: 3 },
+  placeValue: { fontSize: 14, fontWeight: '600' },
+  locateBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  divider: { height: 1, marginLeft: 42 },
   distanceBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingHorizontal: 4 },
-  distanceText: { color: colors.teal, fontSize: 12, fontWeight: '700' },
+  distanceText: { fontSize: 12, fontWeight: '700' },
   errorBox: { backgroundColor: '#FFF0F0', borderRadius: 12, padding: 12, marginBottom: 12 },
   errorText: { color: '#C24141', fontSize: 12, lineHeight: 18, fontWeight: '600' },
-  successBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.tealSoft, borderRadius: 12, padding: 12, marginBottom: 12 },
-  successText: { color: colors.teal, fontSize: 13, fontWeight: '800' },
-  saveBtn: { height: 52, borderRadius: 16, backgroundColor: colors.teal, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 },
+  successBox: { borderRadius: 12, padding: 12, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  successText: { fontSize: 13, fontWeight: '800' },
+  saveBtn: { height: 52, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 },
   pressed: { opacity: 0.7 },
-  saveText: { color: colors.white, fontWeight: '800', fontSize: 15 },
+  saveText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
 });
