@@ -7,7 +7,6 @@ import {
   CircleAlert,
   MapPin,
   ShieldAlert,
-  UsersRound,
   Compass,
   PhoneCall,
   X,
@@ -17,13 +16,17 @@ import {
   ShieldCheck,
   Building2,
   Phone,
+  BellOff,
+  WifiOff,
+  Lightbulb,
 } from 'lucide-react-native';
 import { SafetyScore } from '../../components/safetyScore';
 import { ActionRow, Card, Header, Screen, SectionTitle } from '../../components/ui';
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
-import { useLocation, reverseGeocode } from '../../lib/location';
-import { fetchSpotSafety } from '../../lib/safetyApi';
+import { useLocation, reverseGeocode, formatDistance } from '../../lib/location';
+import { fetchSpotSafety, fetchSafeHubs } from '../../lib/safetyApi';
+import { useNotifications } from '../../lib/notifications';
 import { SOS_STATUS, useSOS } from '../../lib/sos';
 
 export default function HomeScreen() {
@@ -50,6 +53,8 @@ export default function HomeScreen() {
   // ── REAL Safety Score State ──────────────────────────────────────────
   const [safetyData, setSafetyData] = useState(null);
   const [safetyLoading, setSafetyLoading] = useState(true);
+  const [hubsData, setHubsData] = useState(null);
+  const [hubsLoading, setHubsLoading] = useState(true);
   const lastFetchedRef = useRef(null); // prevent duplicate fetches for same location
 
   // Fallback values (used until real data arrives)
@@ -58,6 +63,21 @@ export default function HomeScreen() {
   const safetyFactors = safetyData?.factors ?? null;
   const safetyConfidence = safetyData?.confidence ?? null;
   const isOffline = safetyData?._offline ?? false;
+
+  // ── Real "safety around you" data derived from OSM hubs + spot analysis ──
+  const nearestHub = hubsData?.nearest ?? null;
+  const policeCount = hubsData?.counts?.police ?? null;
+  const streetLamps = hubsData?.counts?.street_lamps ?? safetyData?.details?.street_lamps ?? null;
+  const lightingPct = safetyFactors?.lighting ?? null;
+  const hubsOffline = hubsData?._offline ?? false;
+
+  // ── Real notifications + unread state ────────────────────────────────
+  const { notifications, unreadCount, markAllRead } = useNotifications(safetyData, location);
+
+  function openNotifications() {
+    setShowNotifications(true);
+    markAllRead();
+  }
 
   useEffect(() => {
     requestLocation();
@@ -92,6 +112,18 @@ export default function HomeScreen() {
       .finally(() => {
         setSafetyLoading(false);
       });
+
+    setHubsLoading(true);
+    fetchSafeHubs(location.lat, location.lng)
+      .then((result) => {
+        setHubsData(result);
+      })
+      .catch((err) => {
+        console.warn('Safe hubs fetch failed:', err.message);
+      })
+      .finally(() => {
+        setHubsLoading(false);
+      });
   }, [location]);
 
   return (
@@ -115,15 +147,19 @@ export default function HomeScreen() {
           <Text style={[styles.greetingTitle, { color: colors.ink }]}>{greeting}</Text>
         </View>
         
-        <Pressable 
-          onPress={() => setShowNotifications(true)} 
+        <Pressable
+          onPress={openNotifications}
           style={[
-            styles.bellBtn, 
+            styles.bellBtn,
             { backgroundColor: colors.cardBg, borderColor: colors.line }
           ]}
         >
           <Bell color={colors.ink} size={20} />
-          <View style={[styles.bellBadge, { backgroundColor: colors.pink, borderColor: colors.cardBg }]} />
+          {unreadCount > 0 ? (
+            <View style={[styles.bellCountBadge, { backgroundColor: colors.pink, borderColor: colors.cardBg }]}>
+              <Text style={styles.bellCountText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+            </View>
+          ) : null}
         </Pressable>
       </View>
       
@@ -202,13 +238,34 @@ export default function HomeScreen() {
         <ActionRow
           icon={<MapPin color={colors.teal} size={20} />}
           title={`Current area · ${currentArea}`}
-          subtitle="Nearest Safe Hub: Central Police Station (350m)"
+          subtitle={
+            hubsLoading && !hubsData
+              ? 'Finding nearby safe hubs…'
+              : nearestHub
+              ? `Nearest safe hub: ${nearestHub.name} (${formatDistance(nearestHub.distance_m / 1000)})`
+              : hubsOffline
+              ? 'Nearby safe hubs unavailable — check your connection'
+              : 'No mapped safe hubs found nearby'
+          }
           accent={colors.teal}
         />
         <ActionRow
-          icon={<UsersRound color={colors.blue} size={20} />}
+          icon={<Lightbulb color={colors.blue} size={20} />}
           title="Community safety status"
-          subtitle="2 Active patrols & 95% verified streetlight coverage"
+          subtitle={
+            hubsLoading && safetyLoading && !hubsData
+              ? 'Analysing streetlights & services…'
+              : [
+                  policeCount != null
+                    ? `${policeCount} police station${policeCount === 1 ? '' : 's'} nearby`
+                    : null,
+                  lightingPct != null
+                    ? `lighting ${lightingPct}%${streetLamps != null ? ` (${streetLamps} lamps)` : ''}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ') || 'Live infrastructure data unavailable'
+          }
           accent={colors.blue}
         />
       </Card>
@@ -281,38 +338,49 @@ export default function HomeScreen() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} style={styles.modalBody}>
-              <View style={[styles.notifItem, { borderBottomColor: colors.line }]}>
-                <View style={[styles.notifIcon, { backgroundColor: colors.primarySoft }]}>
-                  <ShieldCheck color={colors.primary} size={18} />
+              {notifications.length === 0 ? (
+                <View style={styles.notifEmpty}>
+                  <View style={[styles.notifIcon, { backgroundColor: colors.paper }]}>
+                    <BellOff color={colors.muted} size={20} />
+                  </View>
+                  <Text style={[styles.notifEmptyTitle, { color: colors.ink }]}>{"You're all caught up"}</Text>
+                  <Text style={[styles.notifEmptyText, { color: colors.muted }]}>
+                    Safety updates and nearby community reports will appear here.
+                  </Text>
                 </View>
-                <View style={styles.notifContent}>
-                  <Text style={[styles.notifTitle, { color: colors.ink }]}>Active Police Patrol nearby</Text>
-                  <Text style={[styles.notifDesc, { color: colors.muted }]}>Patrol unit #TN-04 active on Anna Salai until 11:00 PM.</Text>
-                  <Text style={[styles.notifTime, { color: colors.muted }]}>10 min ago</Text>
-                </View>
-              </View>
-
-              <View style={[styles.notifItem, { borderBottomColor: colors.line }]}>
-                <View style={[styles.notifIcon, { backgroundColor: isDark ? '#3D2810' : '#FEF3E2' }]}>
-                  <Sun color={colors.orange} size={18} />
-                </View>
-                <View style={styles.notifContent}>
-                  <Text style={[styles.notifTitle, { color: colors.ink }]}>Streetlight Maintenance Verified</Text>
-                  <Text style={[styles.notifDesc, { color: colors.muted }]}>3 reported offline lamps repaired near Teynampet metro station.</Text>
-                  <Text style={[styles.notifTime, { color: colors.muted }]}>1 hour ago</Text>
-                </View>
-              </View>
-
-              <View style={[styles.notifItem, { borderBottomColor: colors.line }]}>
-                <View style={[styles.notifIcon, { backgroundColor: isDark ? '#4C1D24' : '#FFE8F0' }]}>
-                  <ShieldAlert color={colors.pink} size={18} />
-                </View>
-                <View style={styles.notifContent}>
-                  <Text style={[styles.notifTitle, { color: colors.ink }]}>Community Alert: Low Lighting</Text>
-                  <Text style={[styles.notifDesc, { color: colors.muted }]}>Citizen report filed: Poor visibility near Bus Stop Lane.</Text>
-                  <Text style={[styles.notifTime, { color: colors.muted }]}>3 hours ago</Text>
-                </View>
-              </View>
+              ) : (
+                notifications.map((n) => {
+                  const iconTint =
+                    n.kind === 'community' ? colors.pink
+                    : n.kind === 'lighting' ? colors.orange
+                    : n.kind === 'offline' ? colors.muted
+                    : colors.primary;
+                  const iconBg =
+                    n.kind === 'community' ? (isDark ? '#4C1D24' : '#FFE8F0')
+                    : n.kind === 'lighting' ? (isDark ? '#3D2810' : '#FEF3E2')
+                    : n.kind === 'offline' ? colors.paper
+                    : colors.primarySoft;
+                  const Icon =
+                    n.kind === 'community' ? ShieldAlert
+                    : n.kind === 'lighting' ? Sun
+                    : n.kind === 'offline' ? WifiOff
+                    : ShieldCheck;
+                  return (
+                    <View key={n.id} style={[styles.notifItem, { borderBottomColor: colors.line }]}>
+                      <View style={[styles.notifIcon, { backgroundColor: iconBg }]}>
+                        <Icon color={iconTint} size={18} />
+                      </View>
+                      <View style={styles.notifContent}>
+                        <Text style={[styles.notifTitle, { color: colors.ink }]}>{n.title}</Text>
+                        <Text style={[styles.notifDesc, { color: colors.muted }]}>{n.desc}</Text>
+                        <Text style={[styles.notifTime, { color: colors.muted }]}>
+                          {n.timeLabel}{n.pending ? ' · not yet synced' : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </ScrollView>
           </View>
         </View>
@@ -328,7 +396,8 @@ const styles = StyleSheet.create({
   modeText: { fontSize: 11, fontWeight: '700' },
   greetingTitle: { fontSize: 26, lineHeight: 32, fontWeight: '800' },
   bellBtn: { width: 44, height: 44, borderRadius: 15, borderWidth: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  bellBadge: { width: 9, height: 9, borderRadius: 5, position: 'absolute', top: 10, right: 10, borderWidth: 1.5 },
+  bellCountBadge: { minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, position: 'absolute', top: 6, right: 6, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  bellCountText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   sosWrap: { marginVertical: 8 },
   sos: { borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 20, borderWidth: 1 },
   sosTriggered: { opacity: 0.9 },
@@ -361,6 +430,9 @@ const styles = StyleSheet.create({
   notifTitle: { fontSize: 14, fontWeight: '700' },
   notifDesc: { fontSize: 12, marginTop: 2, lineHeight: 16 },
   notifTime: { fontSize: 10, marginTop: 4, fontWeight: '600' },
+  notifEmpty: { alignItems: 'center', paddingVertical: 32, gap: 8 },
+  notifEmptyTitle: { fontSize: 15, fontWeight: '800' },
+  notifEmptyText: { fontSize: 12, textAlign: 'center', lineHeight: 18, paddingHorizontal: 20 },
   sosModalContent: { margin: 20, borderRadius: 24, padding: 24, alignItems: 'center' },
   sosModalBadge: { width: 68, height: 68, borderRadius: 34, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   sosModalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 8 },

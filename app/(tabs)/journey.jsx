@@ -10,6 +10,7 @@ import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { useLiveLocation, haversineDistance, formatDistance, formatDuration } from '../../lib/location';
 import { useJourney } from '../../lib/journey';
+import { saveJourney, rateJourney } from '../../lib/journeyApi';
 import { SOS_STATUS, useSOS } from '../../lib/sos';
 import NavigationMap from '../../components/NavigationMap';
 
@@ -39,6 +40,7 @@ export default function JourneyScreen() {
   const [etaMin, setEtaMin] = useState(null);
   const [travelledIdx, setTravelledIdx] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [savedOffline, setSavedOffline] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [rating, setRating] = useState(null);
   const drawerAnim = useRef(new Animated.Value(0)).current;
@@ -96,38 +98,26 @@ export default function JourneyScreen() {
   async function handleEndJourney() {
     stopTracking();
     setSaving(true);
-    try {
-      const res = await fetch('http://localhost:3000/journeys/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          origin: activeJourney.origin,
-          destination: activeJourney.destination,
-          safetyScore: activeJourney.safetyScore,
-          riskLevel: activeJourney.riskLevel,
-          startedAt: activeJourney.startedAt,
-          completedAt: new Date().toISOString(),
-        }),
-      });
-      const data = await res.json();
-      setActiveJourney({ status: 'completed', journeyId: data.journey_id });
-    } catch {
-      setActiveJourney({ status: 'completed' });
-    } finally {
-      setSaving(false);
-    }
+    const result = await saveJourney({
+      origin: activeJourney.origin,
+      destination: activeJourney.destination,
+      safetyScore: activeJourney.safetyScore,
+      riskLevel: activeJourney.riskLevel,
+      segments: activeJourney.segments,
+      features: activeJourney.features,
+      startedAt: activeJourney.startedAt,
+      completedAt: new Date().toISOString(),
+    });
+    setSavedOffline(result.offline);
+    setActiveJourney({ status: 'completed', journeyId: result.journeyId });
+    setSaving(false);
   }
 
   async function handleRateAndFinish(r) {
     if (activeJourney.journeyId && r !== null) {
-      try {
-        await fetch(`http://localhost:3000/journeys/${activeJourney.journeyId}/rating`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userRating: r }),
-        });
-      } catch {}
+      await rateJourney(activeJourney.journeyId, r);
     }
+    setSavedOffline(false);
     clearJourney();
   }
 
@@ -178,6 +168,11 @@ export default function JourneyScreen() {
             {activeJourney.durationMin ?? '0'} min ·{' '}
             Safety score {activeJourney.safetyScore}/100
           </Text>
+          {savedOffline ? (
+            <Text style={[s.completedSub, { color: '#EA4335', fontSize: 12 }]}>
+              {"Saved on your device — it will sync when you're back online."}
+            </Text>
+          ) : null}
           {/* Star rating */}
           <Text style={[s.rateTitle, { color: colors.ink }]}>How safe did you feel?</Text>
           <View style={s.starsRow}>
