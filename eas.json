@@ -12,7 +12,8 @@
       },
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.your-token-here"
+        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.your-token-here",
+        "EXPO_PUBLIC_SAFETY_API_URL": "http://192.168.0.6:8000"
       }
     },
     "preview": {
@@ -22,7 +23,8 @@
       },
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.your-token-here"
+        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.your-token-here",
+        "EXPO_PUBLIC_SAFETY_API_URL": "http://192.168.0.6:8000"
       }
     },
     "production": {
