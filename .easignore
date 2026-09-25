@@ -1,0 +1,27 @@
+node_modules/
+.venv/
+.expo/
+dist/
+web-build/
+**/.gradle/
+**/build/
+**/__pycache__/
+**/.pytest_cache/
+coverage/
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.env
+.env*.local
+.git/
+.bolt/
+.vscode/
+
+# Local-only scripts and audit documents
+express_route_patch.js
+test_headers.js
+test_route.js
+analysis_results.md
+citizen_home_ui_analysis.md
+SAFEHER_PROJECT_REPORT.txt
