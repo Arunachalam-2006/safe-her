@@ -10,7 +10,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from services.overpass_service import _build_query, _categorize_elements, OVERPASS_URL
+from services.overpass_service import _build_query, _categorize_elements, OVERPASS_URL, OVERPASS_HEADERS
 from services.weather_service import fetch_weather
 
 router = APIRouter(prefix="/safety", tags=["safety"])
@@ -172,7 +172,7 @@ async def spot_safety(req: SpotRequest):
                 resp = await client.post(
                     OVERPASS_URL,
                     data={"data": overpass_query},
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    headers=OVERPASS_HEADERS,
                 )
                 resp.raise_for_status()
                 data = resp.json()

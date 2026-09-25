@@ -5,9 +5,46 @@ Runs all segment queries in parallel via asyncio.gather().
 """
 
 import asyncio
+import math
 import httpx
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+# Overpass rejects requests without a User-Agent (HTTP 406). A descriptive UA is
+# also required by OSM usage policy. Shared by all Overpass POSTs.
+OVERPASS_HEADERS = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent": "SafeHer/1.0 (women & citizen safety app; contact@safeher.app)",
+    "Accept": "application/json",
+}
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Distance in metres between two coordinates."""
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lng2 - lng1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _classify_place(tags: dict):
+    """Map an OSM element's tags to a safe-hub (category, human label), or (None, None)."""
+    amenity = tags.get("amenity")
+    if amenity == "police":
+        return ("police", "Police station")
+    if amenity == "hospital":
+        return ("hospital", "Hospital")
+    if amenity == "clinic":
+        return ("clinic", "Clinic")
+    if amenity == "pharmacy":
+        return ("pharmacy", "24/7 pharmacy")
+    if amenity == "fuel":
+        return ("fuel", "Fuel station")
+    if tags.get("public_transport") == "stop_position":
+        return ("bus_stop", "Transit stop")
+    return (None, None)
 
 
 def _build_query(lat: float, lng: float) -> str:
@@ -71,7 +108,7 @@ async def _query_single_segment(
         resp = await client.post(
             OVERPASS_URL,
             data={"data": query},
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers=OVERPASS_HEADERS,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -142,3 +179,55 @@ async def fetch_infrastructure(segments: list[dict]) -> list[dict]:
             cleaned.append(r)
 
     return cleaned
+
+
+async def fetch_nearby_places(lat: float, lng: float) -> dict:
+    """
+    Fetch actual nearby safe hubs (named, with distances) around a single point.
+
+    Returns:
+        {
+            "hubs": [ { category, label, name, lat, lng, distance_m }, ... ]  # sorted nearest-first
+            "counts": { street_lamps, police, hospitals, clinics, pharmacies, ... }
+        }
+    """
+    query = _build_query(lat, lng)
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(
+                OVERPASS_URL,
+                data={"data": query},
+                headers=OVERPASS_HEADERS,
+            )
+            resp.raise_for_status()
+            elements = resp.json().get("elements", [])
+    except Exception as e:
+        print(f"Overpass nearby-places query failed: {e}")
+        return {"hubs": [], "counts": _categorize_elements([]), "error": str(e)}
+
+    counts = _categorize_elements(elements)
+    counts["total_elements"] = len(elements)
+
+    hubs = []
+    for el in elements:
+        tags = el.get("tags", {})
+        category, label = _classify_place(tags)
+        if not category or category == "bus_stop":
+            # bus stops are counted for amenities but are not "safe hubs" to route to
+            continue
+        elat, elng = el.get("lat"), el.get("lon")
+        if elat is None or elng is None:
+            continue
+        hubs.append(
+            {
+                "category": category,
+                "label": label,
+                "name": tags.get("name") or label,
+                "lat": elat,
+                "lng": elng,
+                "distance_m": round(_haversine_m(lat, lng, elat, elng)),
+            }
+        )
+
+    hubs.sort(key=lambda p: p["distance_m"])
+    return {"hubs": hubs, "counts": counts}

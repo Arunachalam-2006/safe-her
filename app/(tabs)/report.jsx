@@ -2,15 +2,15 @@ import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, CheckCircle2, MapPin, Send, ShieldCheck, X } from 'lucide-react-native';
-import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { addReport } from '../../lib/localReports';
+import { usePreferences } from '../../lib/preferences';
 import { Card, Header, Screen, SectionTitle } from '../../components/ui';
 
 const categories = ['Poor lighting', 'Harassment', 'Theft', 'Broken CCTV', 'Unsafe stop', 'Suspicious activity', 'Other'];
 
 export default function ReportScreen() {
-  const { session } = useAuth();
+  const { prefs } = usePreferences();
   const { colors, isDark } = useTheme();
   const [category, setCategory] = useState('Poor lighting');
   const [location, setLocation] = useState('');
@@ -28,13 +28,35 @@ export default function ReportScreen() {
   }
 
   async function submitReport() {
-    if (location.trim().length < 2) { 
-      setStatus({ type: 'error', message: 'Add an area or landmark so the community can understand where this happened.' }); 
-      return; 
+    if (location.trim().length < 2) {
+      setStatus({ type: 'error', message: 'Add an area or landmark so the community can understand where this happened.' });
+      return;
     }
     setStatus({ type: 'loading', message: '' });
-    addReport({ category, location_label: location.trim(), details: details.trim(), image_uri: imageUri, user_id: session?.user?.id || null });
-    setLocation(''); setDetails(''); setImageUri(null); setStatus({ type: 'success', message: 'Thank you. Your anonymous report is now helping improve local safety scores.' });
+
+    // Reports are anonymous by design; identity is never sent to the backend.
+    const result = await addReport({
+      category,
+      location_label: location.trim(),
+      details: details.trim(),
+      image_uri: imageUri,
+    });
+
+    setLocation(''); setDetails(''); setImageUri(null);
+
+    if (result.offline) {
+      setStatus({
+        type: 'success',
+        message: 'Saved on your device. It will sync to the community safety map when you are back online.',
+      });
+    } else {
+      setStatus({
+        type: 'success',
+        message: prefs.anonymousReports
+          ? 'Thank you. Your anonymous report is now live on the community safety map.'
+          : 'Thank you. Your report is now live on the community safety map.',
+      });
+    }
   }
 
   return (

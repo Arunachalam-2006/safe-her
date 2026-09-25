@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, ActivityIndicator, ScrollView } from 'react-native';
-import { Bike, Check, Clock3, Crosshair, Footprints, MapPin, Play, Sparkles, Route as RouteIcon, Car, X } from 'lucide-react-native';
+import { Bike, Check, Clock3, Crosshair, Footprints, MapPin, Play, Sparkles, Route as RouteIcon, Car, X, Search } from 'lucide-react-native';
 import { Card, Header, Pill, Screen, SectionTitle } from '../../components/ui';
 import { useTheme } from '../../lib/theme';
 import { useLocation, formatDistance, formatDuration, reverseGeocode, searchLocation, getRoute } from '../../lib/location';
@@ -127,6 +127,27 @@ export default function RoutesScreen() {
     }
   }
 
+  async function handleSearchTo() {
+    const query = to.trim();
+    if (query.length < 3) {
+      setError('Type at least 3 characters of your destination to search.');
+      return;
+    }
+    setError('');
+    setActiveField('to');
+    setSearchField('to');
+    setSearching(true);
+    try {
+      const results = await searchLocation(query);
+      setSuggestions(results);
+      if (results.length === 0) setError('No matching destinations found. Try a nearby landmark.');
+    } catch (e) {
+      setError('Could not search destinations. Check your connection and try again.');
+    } finally {
+      setSearching(false);
+    }
+  }
+
   function handleSelectRoute(idx) {
     if (idx < 0 || idx >= allRoutes.length) return;
     setSelectedRouteIndex(idx);
@@ -208,7 +229,8 @@ export default function RoutesScreen() {
               onFocus={() => { setActiveField('to'); setSearchField('to'); }}
               onBlur={() => setTimeout(() => setActiveField(null), 500)}
               onClear={() => { setTo(''); setToCoords(null); }}
-              onLocate={() => {}}
+              onLocate={handleSearchTo}
+              locateIcon={Search}
               locating={searching}
               onSelectArea={(place) => { setTo(place.name); setToCoords({ lat: place.lat, lng: place.lng }); setSuggestions([]); setActiveField(null); setError(''); }}
             />
@@ -382,7 +404,7 @@ export default function RoutesScreen() {
   );
 }
 
-function SearchField({ label, value, coords, active, suggestions, iconColor, onChangeText, onFocus, onBlur, onClear, onLocate, locating, onSelectArea, editable = true, placeholder }) {
+function SearchField({ label, value, coords, active, suggestions, iconColor, onChangeText, onFocus, onBlur, onClear, onLocate, locating, onSelectArea, editable = true, placeholder, locateIcon: LocateIcon = Crosshair }) {
   const { colors } = useTheme();
   return (
     <View style={s.fieldWrap}>
@@ -403,7 +425,7 @@ function SearchField({ label, value, coords, active, suggestions, iconColor, onC
         />
         <Pressable disabled={!value} onPress={onClear} style={[s.clearBtn, !value && s.clearBtnHidden]}><X color={colors.muted} size={15} /></Pressable>
         {onLocate ? <Pressable onPress={onLocate} style={[s.locateBtn, { backgroundColor: colors.paper }]}>
-          {locating ? <ActivityIndicator color={iconColor} size="small" /> : <Crosshair color={iconColor} size={16} />}
+          {locating ? <ActivityIndicator color={iconColor} size="small" /> : <LocateIcon color={iconColor} size={16} />}
         </Pressable> : null}
       </View>
       {active && suggestions.length > 0 ? (

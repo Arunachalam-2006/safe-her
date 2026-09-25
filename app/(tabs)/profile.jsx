@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { 
@@ -27,14 +27,26 @@ import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { Card, Header, Pill, Screen, SectionTitle } from '../../components/ui';
 import { useSOS } from '../../lib/sos';
+import { usePreferences } from '../../lib/preferences';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { profile, updateProfile, signOut } = useAuth();
   const { colors, themeName, setThemeName, isDark } = useTheme();
   const { contactCount } = useSOS();
+  const { prefs, update: updatePref } = usePreferences();
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [showAlertsModal, setShowAlertsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+
+  const alertsSummary = prefs.safetyAlerts
+    ? 'On · route risks & nearby reports'
+    : 'Off · no safety notifications';
+  const privacySummary = [
+    prefs.anonymousReports ? 'Anonymous reports' : 'Named reports',
+    prefs.preciseLocation ? 'Precise location' : 'Approximate location',
+  ].join(' · ');
   
   const isGov = profile?.account_type === 'government';
   const initial = (profile?.full_name || profile?.email || 'U').charAt(0).toUpperCase();
@@ -156,8 +168,18 @@ export default function ProfileScreen() {
           detail={contactCount > 0 ? `${contactCount} contact${contactCount === 1 ? '' : 's'} saved` : 'Add trusted contacts for SOS alerts'}
           onPress={() => router.push('/emergency-contacts')}
         />
-        <Setting icon={<Bell color={colors.primary} size={19} />} title="Safety alerts" detail="Get notified about new route risks" />
-        <Setting icon={<LockKeyhole color={colors.orange} size={19} />} title="Privacy controls" detail="Manage location and report settings" />
+        <Setting
+          icon={<Bell color={colors.primary} size={19} />}
+          title="Safety alerts"
+          detail={alertsSummary}
+          onPress={() => setShowAlertsModal(true)}
+        />
+        <Setting
+          icon={<LockKeyhole color={colors.orange} size={19} />}
+          title="Privacy controls"
+          detail={privacySummary}
+          onPress={() => setShowPrivacyModal(true)}
+        />
         <Setting 
           icon={<Settings color={colors.muted} size={19} />} 
           title="App settings" 
@@ -313,7 +335,103 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Safety Alerts Modal */}
+      <Modal visible={showAlertsModal} animationType="slide" transparent onRequestClose={() => setShowAlertsModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={[s.modalSheet, { backgroundColor: colors.cardBg }]}>
+            <View style={[s.modalHeader, { borderBottomColor: colors.line }]}>
+              <View style={s.modalHeaderTitleRow}>
+                <Bell color={colors.ink} size={20} />
+                <Text style={[s.modalTitle, { color: colors.ink }]}>Safety Alerts</Text>
+              </View>
+              <Pressable onPress={() => setShowAlertsModal(false)} style={[s.closeBtn, { backgroundColor: colors.paper }]}>
+                <X color={colors.ink} size={18} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={s.modalBody}>
+              <ToggleRow
+                title="Safety notifications"
+                desc="Show live area risks and nearby community reports in your alerts."
+                value={prefs.safetyAlerts}
+                onValueChange={(v) => updatePref('safetyAlerts', v)}
+              />
+              <ToggleRow
+                title="Low-light warnings"
+                desc="Warn me when streetlight coverage around me is poor."
+                value={prefs.lowLightAlerts}
+                disabled={!prefs.safetyAlerts}
+                onValueChange={(v) => updatePref('lowLightAlerts', v)}
+              />
+              <ToggleRow
+                title="Police & safe-hub alerts"
+                desc="Highlight nearby police stations and 24/7 safe hubs."
+                value={prefs.patrolAlerts}
+                disabled={!prefs.safetyAlerts}
+                onValueChange={(v) => updatePref('patrolAlerts', v)}
+              />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Privacy Controls Modal */}
+      <Modal visible={showPrivacyModal} animationType="slide" transparent onRequestClose={() => setShowPrivacyModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={[s.modalSheet, { backgroundColor: colors.cardBg }]}>
+            <View style={[s.modalHeader, { borderBottomColor: colors.line }]}>
+              <View style={s.modalHeaderTitleRow}>
+                <LockKeyhole color={colors.ink} size={20} />
+                <Text style={[s.modalTitle, { color: colors.ink }]}>Privacy Controls</Text>
+              </View>
+              <Pressable onPress={() => setShowPrivacyModal(false)} style={[s.closeBtn, { backgroundColor: colors.paper }]}>
+                <X color={colors.ink} size={18} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={s.modalBody}>
+              <ToggleRow
+                title="Anonymous reports"
+                desc="Never attach your identity to community hazard reports."
+                value={prefs.anonymousReports}
+                onValueChange={(v) => updatePref('anonymousReports', v)}
+              />
+              <ToggleRow
+                title="Precise location in SOS alerts"
+                desc="Share exact coordinates. Turn off to share only an approximate area (~100 m)."
+                value={prefs.preciseLocation}
+                onValueChange={(v) => updatePref('preciseLocation', v)}
+              />
+              <View style={[s.appInfoBox, { backgroundColor: colors.paper, borderColor: colors.line }]}>
+                <Text style={[s.appInfoTitle, { color: colors.ink }]}>Your data stays with you</Text>
+                <Text style={[s.appInfoSub, { color: colors.muted }]}>
+                  Your live location is only ever shared during an active SOS, and community reports carry no personal identifiers.
+                </Text>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Screen>
+  );
+}
+
+function ToggleRow({ title, desc, value, onValueChange, disabled = false }) {
+  const { colors } = useTheme();
+  return (
+    <View style={[s.toggleRow, { borderBottomColor: colors.line, opacity: disabled ? 0.5 : 1 }]}>
+      <View style={{ flex: 1, paddingRight: 12 }}>
+        <Text style={[s.toggleTitle, { color: colors.ink }]}>{title}</Text>
+        <Text style={[s.toggleDesc, { color: colors.muted }]}>{desc}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        disabled={disabled}
+        trackColor={{ false: colors.line, true: colors.primary }}
+        thumbColor="#FFFFFF"
+        ios_backgroundColor={colors.line}
+      />
+    </View>
   );
 }
 
@@ -370,6 +488,9 @@ const s = StyleSheet.create({
   agencyCard: { flexDirection: 'row', alignItems: 'center' },
   agencyTitle: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   agencySub: { color: '#AAB8CD', fontSize: 12, marginTop: 3 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
+  toggleTitle: { fontSize: 14, fontWeight: '800', marginBottom: 3 },
+  toggleDesc: { fontSize: 12, lineHeight: 16 },
   setting: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1 },
   settingIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
   settingTitle: { fontSize: 14, fontWeight: '800', marginBottom: 4 },
