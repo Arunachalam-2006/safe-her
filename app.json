@@ -17,6 +17,10 @@
     },
     "android": {
       "package": "com.safeher.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
       "permissions": [
         "WAKE_LOCK",
         "INTERNET",

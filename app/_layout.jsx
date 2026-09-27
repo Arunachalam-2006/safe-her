@@ -13,6 +13,15 @@ import SOSConfirmationModal from '../components/SOSConfirmationModal';
 import SOSActiveScreen from '../components/SOSActiveScreen';
 import SplashScreen from '../components/SplashScreen';
 
+// ── DEVELOPER-ONLY ROLE BYPASS ──────────────────────────────────────────
+// Temporary: lets a developer preview the officer dashboard before the
+// Supabase `profiles` table exists. `isDevAccessEnabled()` is always false in a
+// production build, so this cannot affect a released app.
+// REMOVE BY DELETING: lib/government/devAccess.js,
+// components/government/DevRoleSwitch.jsx, and the 3 lines marked DEV-BYPASS.
+import { isDevAccessEnabled, loadDevRoleOverride, setDevRoleOverride } from '../lib/government/devAccess';
+import DevRoleSwitch from '../components/government/DevRoleSwitch';
+
 // Splash stays up for a beat, but is never allowed to trap the user.
 const SPLASH_MIN_MS = 1600;
 const SPLASH_MAX_MS = 4500;
@@ -28,6 +37,15 @@ function RootNavigator() {
   const [minTimeReached, setMinTimeReached] = useState(false);
   const [splashHidden, setSplashHidden] = useState(false);
   const bootStartedAt = useRef(Date.now());
+
+  // DEV-BYPASS 1/3 — role used for routing (override is null in production).
+  const [devRole, setDevRole] = useState(null);
+  const accountType = isDevAccessEnabled() && devRole ? devRole : profile?.account_type;
+
+  useEffect(() => {
+    if (!isDevAccessEnabled()) return;
+    loadDevRoleOverride().then(setDevRole);
+  }, []);
 
   const booted = !loading && onboardingReady;
 
@@ -46,24 +64,27 @@ function RootNavigator() {
   }, []);
 
   const segment = segments[0];
+  const inGov = segment === '(gov)' || segment === 'gov';
+  // `app/auth/*` is a route group under the `auth` path segment, so every
+  // screen in it (login, signup, forgot, reset, verify) resolves to `auth`.
+  const inAuth = segment === 'auth';
 
   // Mirrors the redirect effect below so the splash only lifts once the
   // navigator has actually settled on the right screen.
+  // DEV-BYPASS 2/3 — `accountType` is `profile.account_type` in production.
   const needsRedirect = !onboardingCompleted
     ? segment !== 'onboarding'
     : !session
-      ? segment !== 'auth'
-      : profile?.account_type === 'government'
-        ? segment !== 'gov'
-        : !CITIZEN_ROUTES.includes(segment);
+      ? !inAuth
+      : accountType === 'government'
+        ? !inGov
+        : inAuth || !CITIZEN_ROUTES.includes(segment);
 
   const appReady = booted && ((minTimeReached && !needsRedirect) || splashHidden);
 
   useEffect(() => {
     if (loading || !onboardingReady) return;
 
-    const inAuth = segment === 'auth';
-    const inGov = segment === 'gov';
     const inTabs = segment === '(tabs)';
     const inEdit = segment === 'edit-profile';
     const inEmergency = segment === 'emergency-contacts';
@@ -75,19 +96,30 @@ function RootNavigator() {
     }
 
     if (!session && !inAuth) {
-      router.replace('/auth');
-    } else if (session && profile?.account_type === 'government' && !inGov) {
-      router.replace('/gov');
+      router.replace('/auth/login');
+    } else if (session && inAuth) {
+      // Signed in: never leave an authenticated user on the auth screens.
+      router.replace(accountType === 'government' ? '/(gov)' : '/(tabs)');
+    } else if (session && accountType === 'government' && !inGov) {
+      router.replace('/(gov)');
     } else if (
       session &&
-      profile?.account_type !== 'government' &&
+      accountType !== 'government' &&
       !inTabs &&
       !inEdit &&
       !inEmergency
     ) {
       router.replace('/(tabs)');
     }
-  }, [session, profile, loading, onboardingReady, onboardingCompleted, segment]);
+  }, [session, profile, accountType, loading, onboardingReady, onboardingCompleted, segment]);
+
+  // DEV-BYPASS 3/3 — the floating control. Never rendered outside __DEV__.
+  async function toggleDevRole() {
+    const next = accountType === 'government' ? 'citizen' : 'government';
+    setDevRole(next);
+    await setDevRoleOverride(next);
+    router.replace(next === 'government' ? '/(gov)' : '/(tabs)');
+  }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.paper }]}>
@@ -95,7 +127,8 @@ function RootNavigator() {
         <>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="onboarding" options={{ animation: 'fade', gestureEnabled: false }} />
-            <Stack.Screen name="auth" />
+            <Stack.Screen name="(gov)" options={{ animation: 'fade' }} />
+            <Stack.Screen name="auth" options={{ animation: 'fade' }} />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="gov" />
             <Stack.Screen name="edit-profile" />
@@ -105,6 +138,13 @@ function RootNavigator() {
           <SOSConfirmationModal />
           <SOSActiveScreen />
         </>
+      ) : null}
+
+      {isDevAccessEnabled() && splashHidden ? (
+        <DevRoleSwitch
+          role={accountType}
+          onToggle={toggleDevRole}
+        />
       ) : null}
 
       {splashHidden ? null : (
