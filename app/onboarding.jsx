@@ -195,11 +195,11 @@ export default function OnboardingScreen() {
     } finally {
       // Respect the existing auth + role routing.
       if (session && profile?.account_type === 'government') {
-        router.replace('/gov');
+        router.replace('/(gov)');
       } else if (session) {
         router.replace('/(tabs)');
       } else {
-        router.replace('/auth');
+        router.replace('/auth/login');
       }
     }
   }, [markComplete, session, profile, router]);

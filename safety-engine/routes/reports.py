@@ -1,77 +1,70 @@
 """
 Community Reports Router — POST /reports and GET /reports.
 
-Stores anonymous community hazard reports. Reports are kept in an in-memory
-store (no personal identifiers are persisted) — swap `_REPORTS` for a database
-insert/select when one is available.
+Citizen-facing contract is UNCHANGED: same request model, same response shape.
+The only difference is that records are now persisted to SQLite (see `db.py`)
+and carry extra server-side workflow fields (`status`, `priority`, ...) that
+the citizen app simply ignores. The government dashboard reads those fields
+through the separate `/government/*` router.
+
+Reports are still anonymous: no personal identifiers are stored.
 """
 
-import time
-import math
 import logging
+import time
 from typing import Optional
+
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+import db
 
 router = APIRouter(prefix="/reports", tags=["reports"])
-
-# In-memory store. Newest first. Personal identifiers are intentionally dropped.
-_REPORTS: list[dict] = []
-_MAX_REPORTS = 500
 
 
 class ReportIn(BaseModel):
     category: str
     location_label: str
     details: Optional[str] = ""
-    lat: Optional[float] = None
-    lng: Optional[float] = None
+    lat: Optional[float] = Field(default=None, ge=-90, le=90)
+    lng: Optional[float] = Field(default=None, ge=-180, le=180)
     has_photo: bool = False
-
-
-def _haversine_km(lat1, lng1, lat2, lng2) -> float:
-    R = 6371.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lng2 - lng1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 @router.post("")
 async def create_report(report: ReportIn):
     """Store a new anonymous community report and return the stored record."""
     record = {
-        "id": f"report-{int(time.time() * 1000)}",
+        "id": db.new_id("report"),
         "category": report.category.strip() or "Other",
         "location_label": report.location_label.strip(),
         "details": (report.details or "").strip(),
         "lat": report.lat,
         "lng": report.lng,
         "has_photo": bool(report.has_photo),
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z",
+        "evidence": [],
+        "created_at": db.now_iso(),
+        "status": "NEW",       # government workflow default
+        "priority": "MEDIUM",  # government workflow default
     }
-    _REPORTS.insert(0, record)
-    del _REPORTS[_MAX_REPORTS:]
+    db.insert_report(record)
     logging.info(f"[reports] stored {record['category']} @ {record['location_label']}")
     return {"ok": True, "report": record}
 
 
 @router.get("")
-async def list_reports(lat: Optional[float] = None, lng: Optional[float] = None,
-                       radius_km: float = 25.0, limit: int = 50):
+async def list_reports(
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    radius_km: float = 25.0,
+    limit: int = 50,
+):
     """
     Return community reports, newest first. If lat/lng are given, only reports
-    with coordinates within `radius_km` (plus reports without coordinates) are returned.
-    """
-    if lat is None or lng is None:
-        return {"reports": _REPORTS[:limit]}
+    with coordinates within `radius_km` (plus reports without coordinates) are
+    returned.
 
-    nearby = []
-    for r in _REPORTS:
-        if r.get("lat") is None or r.get("lng") is None:
-            nearby.append(r)
-            continue
-        if _haversine_km(lat, lng, r["lat"], r["lng"]) <= radius_km:
-            nearby.append(r)
-    return {"reports": nearby[:limit]}
+    `limit` is clamped to 1..500 — a negative value previously produced a silent
+    negative slice that discarded the newest records.
+    """
+    return {"reports": db.list_reports(lat=lat, lng=lng, radius_km=radius_km, limit=limit)}

@@ -11,6 +11,9 @@ from routes.spot_safety import router as spot_router
 from routes.hubs import router as hubs_router
 from routes.reports import router as reports_router
 from routes.journeys import router as journeys_router
+from routes.government import router as government_router
+
+import db
 
 app = FastAPI(
     title="SafeHer Safety Engine",
@@ -33,23 +36,33 @@ app.include_router(spot_router)
 app.include_router(hubs_router)
 app.include_router(reports_router)
 app.include_router(journeys_router)
+app.include_router(government_router)
 
 
 @app.get("/")
 async def root():
     return {
         "service": "SafeHer Safety Engine",
-        "version": "1.0.0",
+        "version": "1.1.0",
+        "persistence": "sqlite" if db.get_conn() is not None else "memory",
         "endpoints": [
             "/safety/analyze",
             "/safety/spot",
             "/safety/hubs",
             "/reports",
             "/journeys/save",
+            "/journeys/{journey_id}/rating",
+            "/government/reports",
+            "/government/stats",
+            "/government/sos",
         ],
     }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    conn = db.get_conn()
+    return {
+        "status": "ok",
+        "database": "connected" if conn is not None else "degraded-memory",
+    }
