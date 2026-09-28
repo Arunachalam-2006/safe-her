@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Stack, useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View, FlatList } from 'react-native';
 import {
   ArrowLeft, Plus, Pencil, Trash2, X, UserRound, Phone, Heart, AlertCircle, Check, UsersRound,

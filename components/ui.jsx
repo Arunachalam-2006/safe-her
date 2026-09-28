@@ -93,12 +93,21 @@ export function ActionRow({ icon, title, subtitle, onPress, accent }) {
 
 export function Pill({ children, tone = 'primary' }) {
   const { colors } = useTheme();
-  let toneColor = colors.primary;
-
-  if (tone === 'orange') toneColor = colors.orange;
-  else if (tone === 'pink') toneColor = colors.pink;
-  else if (tone === 'teal' || tone === 'green') toneColor = colors.teal;
-  else if (tone === 'blue') toneColor = colors.blue;
+  // Map tone -> colour with an explicit lookup. The previous if/else chain had
+  // no `amber` or `neutral` branch, so a *warning* pill ("Limited" tracking)
+  // silently fell through to `colors.primary` and rendered violet.
+  const TONE_MAP = {
+    primary: colors.primary,
+    orange: colors.orange,
+    amber: colors.amber ?? colors.orange,
+    pink: colors.pink,
+    teal: colors.teal,
+    green: colors.green ?? colors.teal,
+    blue: colors.blue,
+    neutral: colors.muted,
+    muted: colors.muted,
+  };
+  const toneColor = TONE_MAP[tone] ?? colors.primary;
 
   return (
     <View style={[styles.pill, { backgroundColor: toneColor + '1F' }]}>

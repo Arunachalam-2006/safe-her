@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Mail, Send } from 'lucide-react-native';
+import { Mail, Send } from 'lucide-react-native';
 import { useTheme } from '../../lib/theme';
 import { supabase, describeAuthError, SUPABASE_REDIRECT_URL } from '../../lib/supabase';
 import { validateEmail } from '../../lib/authValidation';
@@ -13,7 +13,6 @@ import {
   AuthHero,
   AuthLink,
   AuthNotice,
-  ConfigWarning,
 } from '../../components/auth/AuthUI';
 
 export default function ForgotPasswordScreen() {

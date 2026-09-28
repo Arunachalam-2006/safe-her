@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as LinkingExpo from 'expo-linking';
-import { Check, KeyRound, ShieldCheck } from 'lucide-react-native';
+import { Check, KeyRound } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../lib/theme';
 import { useAuth } from '../../lib/auth';
-import { consumeAuthDeepLink, describeAuthError, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, consumeAuthDeepLink, describeAuthError, isSupabaseConfigured } from '../../lib/supabase';
 import { validatePassword } from '../../lib/authValidation';
 import {
   AuthButton,

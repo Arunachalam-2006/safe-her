@@ -48,8 +48,12 @@ export default function GovLayout() {
         name="more"
         options={{ title: 'More', tabBarIcon: ({ color, size }) => <BarChart3 color={color} size={size} /> }}
       />
-      {/* Detail routes are pushed on top of the tabs, not shown as tab buttons. */}
+      {/* Detail route pushed on top of the tabs, not shown as a tab button. */}
       <Tabs.Screen name="report" options={{ href: null }} />
+      {/* `pending` and `analytics` have no tab button but ARE reachable from
+          the More screen via router.push('/(gov)/pending' | '/(gov)/analytics').
+          expo-router treats a registered-but-missing route as a hard error, so
+          both the files and these entries are required. */}
       <Tabs.Screen name="pending" options={{ href: null }} />
       <Tabs.Screen name="analytics" options={{ href: null }} />
     </Tabs>

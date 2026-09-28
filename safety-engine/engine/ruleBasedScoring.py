@@ -65,21 +65,34 @@ def rule_based_scoring(features_input: dict) -> dict:
         final_route_score = int(round(weighted_score_sum / total_length))
         for k in global_factors:
             global_factors[k] = int(round((global_factors[k] / total_length) * 100))
-    else:
+    elif segments_data:
+        # Segments exist but all have zero length: keep the last segment's
+        # factors rather than dividing by zero.
         final_route_score = 0
         global_factors = {k: int(round(factors[k] * 100)) for k in WEIGHTS.keys()}
+    else:
+        # No usable segments at all - this happens when every infrastructure
+        # lookup timed out. Previously this raised UnboundLocalError on `factors`
+        # and turned a degraded response into an HTTP 500. Return a neutral
+        # result instead; the caller flags the payload as degraded.
+        final_route_score = 0
+        global_factors = {k: 0 for k in WEIGHTS.keys()}
 
     final_risk = "HIGH"
     if final_route_score >= 80: final_risk = "LOW"
     elif final_route_score >= 60: final_risk = "MODERATE"
     elif final_route_score >= 40: final_risk = "ELEVATED"
 
-    # Best guess dominant road_type
+    # Best guess dominant road_type. Guard BOTH reads against an empty list:
+    # the previous `if segments_data:` covered only the line below it, leaving
+    # an unguarded `segments_data[0]` on the following line.
     dominant_road = "unknown"
+    dominant_road_score = 0.0
     if segments_data:
         dominant_road = segments_data[0]["features"].get("road_type", "unknown")
+        dominant_road_score = segments_data[0]["features"].get("road_score", 0.0)
     global_features["road_type"] = dominant_road
-    global_features["road_score"] = segments_data[0]["features"].get("road_score", 0.0)
+    global_features["road_score"] = dominant_road_score
 
     return {
         "score": final_route_score,

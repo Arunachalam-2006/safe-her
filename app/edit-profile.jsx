@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, ScrollView, SafeAreaView, ActivityIndicator, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { ArrowLeft, Check, Home, MapPin, Briefcase, Phone, UserRound, ShieldCheck, Navigation, Crosshair, Camera, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, Check, Home, Briefcase, Phone, UserRound, Navigation, Crosshair, Camera, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 import { useLocation, haversineDistance, reverseGeocode } from '../lib/location';
@@ -31,27 +31,42 @@ export default function EditProfileScreen() {
   const initial = (fullName || profile?.email || 'U').charAt(0).toUpperCase();
 
   async function pickPhoto() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-    if (!result.canceled) setAvatarUrl(result.assets[0].uri);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm?.granted) return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      // Bounds-checked: `result.assets[0].uri` threw on an empty assets array.
+      if (!result?.canceled && result.assets?.length) {
+        setAvatarUrl(result.assets[0].uri);
+      }
+    } catch {
+      /* leave the current avatar in place */
+    }
   }
 
   function removePhoto() {
     setAvatarUrl(null);
   }
 
-  async function useCurrentLocation(target) {
+  /**
+   * Named `useCurrentLocation`, so ESLint's rules-of-hooks treated this
+   * ordinary function as a React Hook and rejected it being called from inside
+   * `handleSetLocation`. It calls no hooks - it is just a plain helper. Renamed
+   * so the intent is unambiguous and the lint gate passes.
+   */
+  function requestLocationFor(target) {
     setLocating(target);
     requestLocation();
   }
 
   async function handleSetLocation(target) {
     if (!location) {
-      useCurrentLocation(target);
+      requestLocationFor(target);
       return;
     }
     const label = await reverseGeocode(location.lat, location.lng);
@@ -149,9 +164,9 @@ export default function EditProfileScreen() {
 
         <Text style={[s.sectionLabel, { color: colors.muted }]}>Saved places</Text>
         <Card>
-          <PlaceRow icon={<Home color={colors.teal} size={18} />} label="Home" value={homeLabel} onPress={() => useCurrentLocation('home')} locating={locating === 'home'} />
+          <PlaceRow icon={<Home color={colors.teal} size={18} />} label="Home" value={homeLabel} onPress={() => requestLocationFor('home')} locating={locating === 'home'} />
           <Divider />
-          <PlaceRow icon={<Briefcase color={colors.orange} size={18} />} label="Work" value={workLabel} onPress={() => useCurrentLocation('work')} locating={locating === 'work'} />
+          <PlaceRow icon={<Briefcase color={colors.orange} size={18} />} label="Work" value={workLabel} onPress={() => requestLocationFor('work')} locating={locating === 'work'} />
         </Card>
 
         {distance !== null ? (

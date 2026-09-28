@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Camera, CheckCircle2, MapPin, Send, ShieldCheck, X } from 'lucide-react-native';
 import { useTheme } from '../../lib/theme';
 import { addReport } from '../../lib/localReports';
+import { useLocation } from '../../lib/location';
 import { usePreferences } from '../../lib/preferences';
 import { Card, Header, Screen, SectionTitle } from '../../components/ui';
 
@@ -12,6 +13,9 @@ const categories = ['Poor lighting', 'Harassment', 'Theft', 'Broken CCTV', 'Unsa
 export default function ReportScreen() {
   const { prefs } = usePreferences();
   const { colors, isDark } = useTheme();
+  // Reports previously carried no coordinates at all, so the backend's radius
+  // filter could never work and no report could be placed on a map.
+  const { location: currentLocation, requestLocation } = useLocation();
   const [category, setCategory] = useState('Poor lighting');
   const [location, setLocation] = useState('');
   const [details, setDetails] = useState('');
@@ -19,12 +23,25 @@ export default function ReportScreen() {
   const [status, setStatus] = useState({ type: 'idle', message: '' });
 
   async function pickPhoto() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-    });
-    if (!result.canceled) setImageUri(result.assets[0].uri);
+    try {
+      // A permission failure here was an unhandled rejection.
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm?.granted) {
+        setStatus({ type: 'error', message: 'Photo access is needed to attach evidence.' });
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+      // `result.assets[0]` was accessed with no bounds check.
+      if (!result?.canceled && result.assets?.length) {
+        setImageUri(result.assets[0].uri);
+      }
+    } catch {
+      setStatus({ type: 'error', message: 'Could not open your photo library.' });
+    }
   }
 
   async function submitReport() {
@@ -34,27 +51,58 @@ export default function ReportScreen() {
     }
     setStatus({ type: 'loading', message: '' });
 
+    // Best-effort fix so the report can be geo-placed. Never blocks submission.
+    let coords = null;
+    try {
+      if (!currentLocation) await requestLocation();
+      coords = currentLocation
+        ? { lat: currentLocation.lat, lng: currentLocation.lng }
+        : null;
+    } catch {
+      coords = null;
+    }
+
     // Reports are anonymous by design; identity is never sent to the backend.
     const result = await addReport({
       category,
       location_label: location.trim(),
       details: details.trim(),
       image_uri: imageUri,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
     });
 
     setLocation(''); setDetails(''); setImageUri(null);
 
+    if (result.failed) {
+      setStatus({
+        type: 'error',
+        message: 'Could not save your report. Please try again in a moment.',
+      });
+      return;
+    }
+
     if (result.offline) {
+      // The old copy claimed the report "will sync to the community safety map
+      // when you are back online". Nothing ever flushed the pending queue, so
+      // the report was silently never sent. It still is not auto-synced - say so.
       setStatus({
         type: 'success',
-        message: 'Saved on your device. It will sync to the community safety map when you are back online.',
+        message:
+          'Saved on this device only. It is NOT uploaded yet and officers cannot see it — please submit again when you have a connection.',
+      });
+    } else if (imageUri) {
+      setStatus({
+        type: 'success',
+        message:
+          'Thank you. Your report reached the safety engine. The photo is kept on your device only and was not uploaded.',
       });
     } else {
       setStatus({
         type: 'success',
         message: prefs.anonymousReports
-          ? 'Thank you. Your anonymous report is now live on the community safety map.'
-          : 'Thank you. Your report is now live on the community safety map.',
+          ? 'Thank you. Your anonymous report was received by the safety engine.'
+          : 'Thank you. Your report was received by the safety engine.',
       });
     }
   }

@@ -1,7 +1,7 @@
 """
 SQLite persistence for the SafeHer Safety Engine.
 
-Uses only the Python standard library — no new dependency is required.
+Uses only the Python standard library â€” no new dependency is required.
 
 Why this exists
 ---------------
@@ -15,24 +15,42 @@ Design rules
 * Citizen write compatibility is preserved. `POST /reports` and `GET /reports`
   keep their exact request and response shapes; new workflow fields are
   server-side defaults only.
-* If the database file cannot be opened, the engine degrades to an in-memory
-  store rather than failing to boot.
+* If the database file cannot be opened, every write function returns None and
+  every read returns empty. Callers are expected to treat that as a failure.
+  (The previous docstring promised an in-memory fallback store, but no such
+  store ever existed - data was silently dropped while HTTP 200 said success.)
+* `storage_available()` reports whether persistence is actually working, and
+  `main.py` surfaces it on /health so a degraded engine is visible.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import threading
 import time
 from typing import Any, Optional
+from uuid import uuid4
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+)
+log = logging.getLogger("safeher.db")
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "safeher.db")
 
 _LOCK = threading.RLock()
 _CONN: Optional[sqlite3.Connection] = None
 _MEMORY_FALLBACK = False
+_ID_SEQ = 0
+
+
+def storage_available() -> bool:
+    """True when persistence is actually working (not the degraded no-op path)."""
+    return get_conn() is not None
 
 
 SCHEMA = """
@@ -89,6 +107,11 @@ CREATE TABLE IF NOT EXISTS sos_alerts (
     updated_at    TEXT
 );
 
+-- /government/sos filtered on status and ordered by received_at with a full
+-- table scan + filesort on every poll, because neither column was indexed.
+CREATE INDEX IF NOT EXISTS idx_sos_status_received ON sos_alerts(status, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sos_received ON sos_alerts(received_at DESC);
+
 CREATE TABLE IF NOT EXISTS journeys (
     id         TEXT PRIMARY KEY,
     payload    TEXT NOT NULL,
@@ -97,7 +120,7 @@ CREATE TABLE IF NOT EXISTS journeys (
 """
 
 
-# ── Connection handling ────────────────────────────────────────────────
+# â”€â”€ Connection handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_conn() -> Optional[sqlite3.Connection]:
     """Return the shared connection, or None when running degraded (memory)."""
@@ -127,68 +150,137 @@ def now_iso() -> str:
 
 
 def new_id(prefix: str) -> str:
-    return f"{prefix}-{int(time.time() * 1000)}-{os.getpid()}"
+    """
+    Collision-resistant id.
+
+    The old scheme was `f"{prefix}-{ms}-{pid}"`, which produced identical
+    primary keys for two inserts in the same millisecond on one worker - and
+    insert_report had no ON CONFLICT, so the UNIQUE violation surfaced as a
+    500. Adds a per-process counter and random suffix.
+    """
+    global _ID_SEQ
+    with _LOCK:
+        _ID_SEQ += 1
+        seq = _ID_SEQ
+    return f"{prefix}-{int(time.time() * 1000)}-{seq:x}{os.getpid():x}{uuid4().hex[:6]}"
 
 
-# ── Reports ────────────────────────────────────────────────────────────
+# â”€â”€ Reports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def insert_report(record: dict[str, Any]) -> dict[str, Any]:
-    """Insert a citizen report. Extra workflow columns are server-side defaults."""
+def insert_report(record: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """
+    Insert a citizen report. Extra workflow columns are server-side defaults.
+
+    Returns None when storage is unavailable so the caller can answer 503.
+    It previously returned the input record, which made POST /reports reply
+    {"ok": true} while writing absolutely nothing.
+    """
     conn = get_conn()
     if conn is None:
-        return record
+        return None
 
     with _LOCK:
-        conn.execute(
-            """
-            INSERT INTO reports (
-                id, category, location_label, details, lat, lng,
-                has_photo, evidence, created_at, status, priority, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                record["id"],
-                record.get("category", "Other"),
-                record.get("location_label", ""),
-                record.get("details", "") or "",
-                record.get("lat"),
-                record.get("lng"),
-                1 if record.get("has_photo") else 0,
-                json.dumps(record.get("evidence", []) or []),
-                record.get("created_at") or now_iso(),
-                record.get("status") or "NEW",
-                record.get("priority") or "MEDIUM",
-                now_iso(),
-            ),
-        )
-        conn.commit()
+        try:
+            conn.execute(
+                """
+                INSERT INTO reports (
+                    id, category, location_label, details, lat, lng,
+                    has_photo, evidence, created_at, status, priority, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["id"],
+                    record.get("category", "Other"),
+                    record.get("location_label", ""),
+                    record.get("details", "") or "",
+                    record.get("lat"),
+                    record.get("lng"),
+                    1 if record.get("has_photo") else 0,
+                    json.dumps(record.get("evidence", []) or []),
+                    record.get("created_at") or now_iso(),
+                    record.get("status") or "NEW",
+                    record.get("priority") or "MEDIUM",
+                    now_iso(),
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            log.error("Duplicate report id %s rejected", record.get("id"))
+            return None
+        except sqlite3.Error:
+            conn.rollback()
+            log.exception("insert_report failed")
+            return None
     return record
 
 
 def list_reports(lat: Optional[float] = None, lng: Optional[float] = None,
-                 radius_km: float = 25.0, limit: int = 50) -> list[dict[str, Any]]:
+                 radius_km: float = 25.0, limit: int = 50,
+                 status: Optional[str] = None, priority: Optional[str] = None,
+                 search: Optional[str] = None) -> list[dict[str, Any]]:
     conn = get_conn()
     if conn is None:
         return []
 
-    limit = max(1, min(int(limit or 50), 500))  # clamp: negative limits caused silent data loss
+    try:
+        limit = max(1, min(int(limit or 50), 500))  # clamp: negative limits caused silent data loss
+    except (TypeError, ValueError, OverflowError):
+        # `?limit=1e400` parses to float('inf') and int(inf) raised OverflowError.
+        limit = 50
+
+    # Filtering happens in SQL. Previously the newest N rows were fetched and
+    # only then filtered in Python, so `?priority=CRITICAL` returned an empty
+    # list whenever the newest N happened to be a different priority.
+    where: list[str] = []
+    params: list[Any] = []
+    if status:
+        where.append("status = ?")
+        params.append(status.upper())
+    if priority:
+        where.append("priority = ?")
+        params.append(priority.upper())
+    if search:
+        term = f"%{search.strip().lower()}%"
+        where.append(
+            "(LOWER(IFNULL(id,'')) LIKE ? OR LOWER(IFNULL(category,'')) LIKE ?"
+            " OR LOWER(IFNULL(location_label,'')) LIKE ? OR LOWER(IFNULL(details,'')) LIKE ?)"
+        )
+        params.extend([term, term, term, term])
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+
+    # When a radius is requested we must oversample, because the geo filter runs
+    # in Python. A single half-width coordinate pair is NOT enough: previously
+    # supplying only `lat` silently disabled filtering and returned every report
+    # worldwide, contradicting the endpoint's own docstring.
+    oversample = 4 if (lat is not None and lng is not None) else 1
 
     with _LOCK:
         rows = conn.execute(
-            "SELECT * FROM reports ORDER BY created_at DESC LIMIT ?",
-            (limit * 4 if (lat is not None and lng is not None) else limit,),
+            f"SELECT * FROM reports{clause} ORDER BY created_at DESC LIMIT ?",
+            (*params, limit * oversample),
         ).fetchall()
 
     out: list[dict[str, Any]] = []
+    do_geo = lat is not None and lng is not None
     for row in rows:
         item = row_to_report(row)
-        if lat is not None and lng is not None and item.get("lat") is not None and item.get("lng") is not None:
+        if do_geo and item.get("lat") is not None and item.get("lng") is not None:
             if haversine_km(lat, lng, item["lat"], item["lng"]) > max(0.0, radius_km):
                 continue
         out.append(item)
         if len(out) >= limit:
             break
     return out
+
+
+def get_sos_alert(alert_id: str) -> Optional[dict[str, Any]]:
+    conn = get_conn()
+    if conn is None:
+        return None
+    with _LOCK:
+        row = conn.execute("SELECT * FROM sos_alerts WHERE id = ?", (alert_id,)).fetchone()
+    return row_to_sos_alert(row) if row else None
 
 
 def get_report(report_id: str) -> Optional[dict[str, Any]]:
@@ -325,7 +417,7 @@ def report_stats() -> dict[str, Any]:
     return {"total": total, "by_status": by_status, "by_priority": by_priority}
 
 
-# ── SOS alerts ─────────────────────────────────────────────────────────
+# â”€â”€ SOS alerts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def upsert_sos_alert(alert: dict[str, Any]) -> dict[str, Any]:
     conn = get_conn()
@@ -367,6 +459,23 @@ def upsert_sos_alert(alert: dict[str, Any]) -> dict[str, Any]:
     return alert
 
 
+def row_to_sos_alert(row: sqlite3.Row) -> dict[str, Any]:
+    keys = row.keys()
+    return {
+        "id": row["id"],
+        "status": row["status"],
+        "priority": row["priority"],
+        "lat": row["lat"],
+        "lng": row["lng"],
+        "accuracy": row["accuracy"],
+        "contact_count": row["contact_count"],
+        "assigned_to": row["assigned_to"],
+        "notes": row["notes"],
+        "received_at": row["received_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def list_sos_alerts(include_resolved: bool = False) -> list[dict[str, Any]]:
     conn = get_conn()
     if conn is None:
@@ -380,22 +489,7 @@ def list_sos_alerts(include_resolved: bool = False) -> list[dict[str, Any]]:
     with _LOCK:
         rows = conn.execute(sql).fetchall()
 
-    return [
-        {
-            "id": r["id"],
-            "status": r["status"],
-            "priority": r["priority"],
-            "lat": r["lat"],
-            "lng": r["lng"],
-            "accuracy": r["accuracy"],
-            "contact_count": r["contact_count"],
-            "assigned_to": r["assigned_to"],
-            "notes": r["notes"],
-            "received_at": r["received_at"],
-            "updated_at": r["updated_at"],
-        }
-        for r in rows
-    ]
+    return [row_to_sos_alert(r) for r in rows]
 
 
 def update_sos_alert(alert_id: str, status: str, notes: str, officer: str) -> Optional[dict[str, Any]]:
@@ -433,25 +527,71 @@ def update_sos_alert(alert_id: str, status: str, notes: str, officer: str) -> Op
     }
 
 
-# ── Journeys ───────────────────────────────────────────────────────────
+# â”€â”€ Journeys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def save_journey(journey_id: str, payload: dict[str, Any]) -> str:
+def save_journey(journey_id: str, payload: dict[str, Any]) -> Optional[str]:
+    """Persist a journey. Returns None when storage is unavailable."""
     conn = get_conn()
     if conn is None:
-        return journey_id
+        return None
 
     with _LOCK:
-        conn.execute(
-            "INSERT OR REPLACE INTO journeys (id, payload, saved_at) VALUES (?, ?, ?)",
-            (journey_id, json.dumps(payload, default=str), now_iso()),
-        )
-        conn.commit()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO journeys (id, payload, saved_at) VALUES (?, ?, ?)",
+                (journey_id, json.dumps(payload, default=str), now_iso()),
+            )
+            conn.commit()
+        except sqlite3.Error:
+            conn.rollback()
+            log.exception("save_journey failed")
+            return None
     return journey_id
+
+
+def list_journeys(limit: int = 50, owner_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """
+    Return saved journeys, newest first.
+
+    When `owner_id` is supplied only that owner's journeys are returned. The
+    owner id lives inside the JSON payload, so filtering happens in Python;
+    with a bounded journey table this stays cheap.
+    """
+    conn = get_conn()
+    if conn is None:
+        return []
+
+    try:
+        limit = max(1, min(int(limit or 50), 200))
+    except (TypeError, ValueError, OverflowError):
+        limit = 50
+
+    with _LOCK:
+        rows = conn.execute(
+            "SELECT id, payload, saved_at FROM journeys ORDER BY saved_at DESC LIMIT ?",
+            (limit * 4 if owner_id else limit,),
+        ).fetchall()
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if owner_id and str(payload.get("owner_id") or "") != owner_id:
+            continue
+        out.append(payload)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def rate_journey(journey_id: str, rating: int) -> bool:
     conn = get_conn()
     if conn is None:
+        return False
+
+    if not isinstance(rating, int) or not 1 <= rating <= 5:
         return False
 
     with _LOCK:
@@ -471,7 +611,7 @@ def rate_journey(journey_id: str, rating: int) -> bool:
     return True
 
 
-# ── Helpers ────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def row_to_report(row: sqlite3.Row) -> dict[str, Any]:
     try:

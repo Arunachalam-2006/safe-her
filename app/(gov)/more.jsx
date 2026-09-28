@@ -14,7 +14,6 @@ import {
   Bell,
   ChevronRight,
   ClipboardList,
-  Info,
   LogOut,
   Moon,
   ShieldCheck,

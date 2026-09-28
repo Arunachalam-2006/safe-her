@@ -8,7 +8,6 @@ import {
   MapPin,
   ShieldAlert,
   Compass,
-  PhoneCall,
   X,
   Radio,
   Sun,
@@ -26,6 +25,10 @@ import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { useLocation, reverseGeocode, formatDistance } from '../../lib/location';
 import { fetchSpotSafety, fetchSafeHubs } from '../../lib/safetyApi';
+import {
+  offlineSpotFallback,
+  offlineHubsFallback,
+} from '../../lib/safetyFallbacks';
 import { useNotifications } from '../../lib/notifications';
 import { SOS_STATUS, useSOS } from '../../lib/sos';
 
@@ -40,7 +43,8 @@ export default function HomeScreen() {
     ? `${profile.emergency_contact_name}${profile.emergency_contact_phone ? ` (${profile.emergency_contact_phone})` : ''}`
     : null;
   const [currentArea, setCurrentArea] = useState('Locating...');
-  const { location, requestLocation } = useLocation();
+  const { location, error: locationError, loading: locating, requestLocation } = useLocation();
+  const [locationRequested, setLocationRequested] = useState(false);
   
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -57,19 +61,30 @@ export default function HomeScreen() {
   const [hubsLoading, setHubsLoading] = useState(true);
   const lastFetchedRef = useRef(null); // prevent duplicate fetches for same location
 
-  // Fallback values (used until real data arrives)
-  const safetyScore = safetyData?.score ?? (isNightTime ? 82 : 94);
-  const safetyLabel = safetyData?.label ?? (isNightTime ? 'Moderate Night Safety' : 'High Safety Zone');
+  // Fallbacks come from one place (lib/safetyFallbacks.js) so the Home screen,
+  // the Routes screen and the scoring component can never disagree again.
+  const offline = offlineSpotFallback();
+  const safetyScore = safetyData?.score ?? offline.score;
+  const safetyLabel = safetyData?.label ?? offline.label;
   const safetyFactors = safetyData?.factors ?? null;
   const safetyConfidence = safetyData?.confidence ?? null;
-  const isOffline = safetyData?._offline ?? false;
+  const isOffline = safetyData?._offline === true || safetyData == null;
+  // The engine flags partial data (Overpass/weather outage) separately from a
+  // total failure. Both mean "do not present this as a confident measurement".
+  const isDegraded = safetyData?._degraded === true || safetyData?.degraded === true;
 
   // ── Real "safety around you" data derived from OSM hubs + spot analysis ──
+  // `counts` is null (not all-zero) when the hubs call failed, so `??` is safe
+  // here: a real 0 police count still renders as 0 because we null-check the
+  // parent object rather than the number.
   const nearestHub = hubsData?.nearest ?? null;
-  const policeCount = hubsData?.counts?.police ?? null;
-  const streetLamps = hubsData?.counts?.street_lamps ?? safetyData?.details?.street_lamps ?? null;
+  const hubsCounts = hubsData?.counts ?? null;
+  const policeCount = hubsCounts ? hubsCounts.police : null;
+  const streetLamps = hubsCounts
+    ? hubsCounts.street_lamps
+    : (safetyData?.details?.street_lamps ?? null);
   const lightingPct = safetyFactors?.lighting ?? null;
-  const hubsOffline = hubsData?._offline ?? false;
+  const hubsOffline = hubsData?._offline === true || hubsData == null;
 
   // ── Real notifications + unread state ────────────────────────────────
   const { notifications, unreadCount, markAllRead } = useNotifications(safetyData, location);
@@ -80,21 +95,37 @@ export default function HomeScreen() {
   }
 
   useEffect(() => {
-    requestLocation();
+    requestLocation().finally(() => setLocationRequested(true));
   }, [requestLocation]);
 
   useEffect(() => {
     if (location) {
-      reverseGeocode(location.lat, location.lng).then(name => {
-        setCurrentArea(name.split(',')[0] || 'Chennai Central');
-      });
+      // Previously `.then()` with no `.catch()`: any rejection here was
+      // unhandled, and the "Locating..." label never cleared.
+      let cancelled = false;
+      reverseGeocode(location.lat, location.lng)
+        .then((name) => {
+          if (cancelled) return;
+          setCurrentArea(
+            typeof name === 'string' && name.trim()
+              ? name.split(',')[0] || 'Current area'
+              : 'Current area',
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setCurrentArea('Current area');
+        });
+      return () => {
+        cancelled = true;
+      };
     }
+    return undefined;
   }, [location]);
 
   // ── Fetch spot safety when location becomes available ───────────────
   useEffect(() => {
     if (!location) return;
-    
+
     // Deduplicate: don't re-fetch if coords haven't meaningfully changed
     const coordKey = `${location.lat.toFixed(3)},${location.lng.toFixed(3)}`;
     if (lastFetchedRef.current === coordKey) return;
@@ -107,7 +138,7 @@ export default function HomeScreen() {
       })
       .catch((err) => {
         console.warn('Spot safety fetch failed:', err.message);
-        // safetyData stays null → component shows time-based fallback via defaults above
+        setSafetyData(offlineSpotFallback());
       })
       .finally(() => {
         setSafetyLoading(false);
@@ -118,13 +149,25 @@ export default function HomeScreen() {
       .then((result) => {
         setHubsData(result);
       })
-      .catch((err) => {
-        console.warn('Safe hubs fetch failed:', err.message);
+      .catch(() => {
+        setHubsData(offlineHubsFallback());
       })
       .finally(() => {
         setHubsLoading(false);
       });
   }, [location]);
+
+  // If location permission was denied (or the fix never arrived) the effect
+  // above returns early, so its .finally() never ran and BOTH spinners stayed
+  // true forever: the card read "Analyzing area..." indefinitely with no error
+  // and no timeout. Bail out explicitly once the request has settled.
+  useEffect(() => {
+    if (location || !locationRequested) return undefined;
+    setSafetyLoading(false);
+    setHubsLoading(false);
+    setCurrentArea('Location unavailable');
+    return undefined;
+  }, [location, locationRequested]);
 
   return (
     <Screen>
@@ -171,7 +214,15 @@ export default function HomeScreen() {
         confidence={safetyConfidence}
         loading={safetyLoading && !safetyData}
         offline={isOffline}
+        degraded={isDegraded}
       />
+
+      {locationError ? (
+        <View style={[styles.locError, { backgroundColor: colors.safetyCardBg ?? colors.cardBg, borderColor: colors.line }]}>
+          <CircleAlert color={colors.orange} size={16} />
+          <Text style={[styles.locErrorText, { color: colors.ink }]}>{locationError}</Text>
+        </View>
+      ) : null}
       
       {/* Smart Emergency SOS Trigger Card */}
       <View style={styles.sosWrap}>
@@ -230,10 +281,8 @@ export default function HomeScreen() {
       </View>
       
       {/* Your Safety Around You */}
-      <SectionTitle action={<Text style={[styles.seeAll, { color: colors.primary }]}>View Live Map</Text>}>
-        Your safety around you
-      </SectionTitle>
-      
+      <SectionTitle>Your safety around you</SectionTitle>
+
       <Card>
         <ActionRow
           icon={<MapPin color={colors.teal} size={20} />}
@@ -242,7 +291,7 @@ export default function HomeScreen() {
             hubsLoading && !hubsData
               ? 'Finding nearby safe hubs…'
               : nearestHub
-              ? `Nearest safe hub: ${nearestHub.name} (${formatDistance(nearestHub.distance_m / 1000)})`
+              ? `Nearest safe hub: ${nearestHub.name} (${formatDistance((nearestHub.distance_m ?? 0) / 1000)})`
               : hubsOffline
               ? 'Nearby safe hubs unavailable — check your connection'
               : 'No mapped safe hubs found nearby'
@@ -256,6 +305,9 @@ export default function HomeScreen() {
             hubsLoading && safetyLoading && !hubsData
               ? 'Analysing streetlights & services…'
               : [
+                  // `policeCount` is null (not 0) when the hubs call failed, so
+                  // a failed lookup can no longer print "0 police stations
+                  // nearby" as though it had measured zero.
                   policeCount != null
                     ? `${policeCount} police station${policeCount === 1 ? '' : 's'} nearby`
                     : null,
@@ -433,14 +485,6 @@ const styles = StyleSheet.create({
   notifEmpty: { alignItems: 'center', paddingVertical: 32, gap: 8 },
   notifEmptyTitle: { fontSize: 15, fontWeight: '800' },
   notifEmptyText: { fontSize: 12, textAlign: 'center', lineHeight: 18, paddingHorizontal: 20 },
-  sosModalContent: { margin: 20, borderRadius: 24, padding: 24, alignItems: 'center' },
-  sosModalBadge: { width: 68, height: 68, borderRadius: 34, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  sosModalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 8 },
-  sosModalSub: { fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 20 },
-  sosConfirmBtn: { width: '100%', paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginBottom: 10 },
-  sosConfirmText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
-  callHelplineBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', paddingVertical: 12, borderRadius: 14, borderWidth: 1, marginBottom: 10 },
-  callHelplineText: { fontWeight: '700', fontSize: 13 },
-  cancelBtn: { paddingVertical: 10 },
-  cancelText: { fontSize: 13, fontWeight: '600' },
+  locError: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, borderWidth: 1, padding: 12, marginTop: 10 },
+  locErrorText: { fontSize: 12, flex: 1, lineHeight: 17 },
 });

@@ -7,25 +7,16 @@
     "development": {
       "distribution": "internal",
       "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "buildType": "apk"
       },
-      "channel": "development",
-      "env": {
-        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.your-token-here",
-        "EXPO_PUBLIC_SAFETY_API_URL": "http://192.168.0.6:8000"
-      }
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       },
-      "channel": "preview",
-      "env": {
-        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.your-token-here",
-        "EXPO_PUBLIC_SAFETY_API_URL": "http://192.168.0.6:8000"
-      }
+      "channel": "preview"
     },
     "production": {
       "channel": "production"

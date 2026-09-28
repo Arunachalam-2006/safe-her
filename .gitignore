@@ -15,6 +15,13 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Generated native projects.
+# `android/` used to be committed, which meant `expo prebuild` never ran and
+# native assets (icons, splash, manifest) silently drifted from app.json.
+# Regenerate with: npx expo prebuild --clean
+android/
+ios/
+
 # metro
 .metro-health-check*
 

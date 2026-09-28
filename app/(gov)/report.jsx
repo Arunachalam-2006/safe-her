@@ -18,7 +18,6 @@ import {
   Clock3,
   ImageOff,
   MapPin,
-  Phone,
   UserRound,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';

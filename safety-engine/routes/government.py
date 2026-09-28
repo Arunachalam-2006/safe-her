@@ -22,7 +22,7 @@ without adding an officer auth dependency — see the audit report.
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import db
@@ -43,23 +43,42 @@ ALLOWED_TRANSITIONS = {
 
 
 class ActionIn(BaseModel):
-    type: str = "ACTION"
-    action_type: Optional[str] = None
-    to_status: Optional[str] = None
-    notes: str = ""
-    resolution_notes: Optional[str] = None
-    assigned_to: Optional[str] = None
-    assigned_department: Optional[str] = None
-    priority: Optional[str] = None
+    # Length limits added: these strings were previously unbounded free text
+    # written straight into SQLite on an unauthenticated endpoint.
+    type: str = Field("ACTION", max_length=40)
+    action_type: Optional[str] = Field(None, max_length=60)
+    to_status: Optional[str] = Field(None, max_length=20)
+    notes: str = Field("", max_length=4000)
+    resolution_notes: Optional[str] = Field(None, max_length=4000)
+    assigned_to: Optional[str] = Field(None, max_length=120)
+    assigned_department: Optional[str] = Field(None, max_length=120)
+    priority: Optional[str] = Field(None, max_length=20)
     has_evidence: bool = False
-    officer: str = ""
-    department: str = ""
+    officer: str = Field("", max_length=120)
+    department: str = Field("", max_length=120)
 
 
 class SosUpdateIn(BaseModel):
-    status: str
-    notes: str = ""
-    officer: str = ""
+    status: str = Field(..., max_length=20)
+    notes: str = Field("", max_length=4000)
+    officer: str = Field("", max_length=120)
+
+
+class SosIngestIn(BaseModel):
+    """
+    Typed intake model for citizen-originated SOS alerts.
+
+    This was a bare `dict`, so there was no coordinate validation, no length
+    limits, and an attacker-controlled `session_id` was used directly as the
+    PRIMARY KEY (a non-string value makes sqlite3 raise InterfaceError).
+    """
+    session_id: Optional[str] = Field(None, max_length=120)
+    lat: float = Field(..., ge=-90.0, le=90.0, allow_inf_nan=False)
+    lng: float = Field(..., ge=-180.0, le=180.0, allow_inf_nan=False)
+    accuracy: Optional[float] = Field(None, ge=0.0, le=100000.0, allow_inf_nan=False)
+    contact_count: int = Field(0, ge=0, le=100)
+    status: str = Field("ACTIVE", max_length=20)
+    notes: str = Field("", max_length=4000)
 
 
 # ── Reports ────────────────────────────────────────────────────────────
@@ -69,36 +88,27 @@ async def list_government_reports(
     status: Optional[str] = None,
     priority: Optional[str] = None,
     q: Optional[str] = None,
-    limit: int = 200,
+    limit: int = Query(200, ge=1, le=500),
 ):
     """List reports for the officer dashboard."""
-    reports = db.list_reports(limit=max(1, min(int(limit or 200), 500)))
-
-    if status and status.upper() != "ALL":
-        want = status.upper()
-        reports = [r for r in reports if r["status"] == want]
-
-    if priority and priority.upper() != "ALL":
-        want = priority.upper()
-        reports = [r for r in reports if r["priority"] == want]
-
-    if q:
-        term = q.strip().lower()
-        if term:
-            reports = [
-                r
-                for r in reports
-                if term
-                in " ".join(
-                    str(x).lower()
-                    for x in (r["id"], r["category"], r["location_label"], r["details"])
-                    if x
-                )
-            ]
+    # Filters are applied in SQL, not after the row limit. Previously the newest
+    # `limit` rows were fetched and only then filtered, so `?priority=CRITICAL`
+    # returned an empty list whenever the newest 200 happened to be MEDIUM.
+    reports = db.list_reports(
+        limit=limit,
+        status=status.upper() if status and status.upper() != "ALL" else None,
+        priority=priority.upper() if priority and priority.upper() != "ALL" else None,
+        search=q,
+    )
 
     rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-    reports.sort(key=lambda r: (rank.get(r["priority"], 9), r["created_at"]), reverse=False)
-    reports.sort(key=lambda r: (rank.get(r["priority"], 9),), reverse=False)
+    # Newest first WITHIN each priority bucket.
+    # The previous code sorted by (rank, created_at) and then re-sorted by
+    # (rank,) alone; because the second sort is stable it preserved the
+    # ascending created_at order, listing the OLDEST CRITICAL alert first.
+    # Python's sort is stable, so the second pass keeps the first pass's order.
+    reports.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    reports.sort(key=lambda r: rank.get(r["priority"], 9))
 
     return {"reports": reports, "count": len(reports)}
 
@@ -192,12 +202,33 @@ async def list_sos(include_resolved: bool = False):
     return {"alerts": db.list_sos_alerts(include_resolved=include_resolved)}
 
 
+# SOS alert state machine. Previously absent entirely, so `RESOLVED -> ACTIVE`
+# was legal and anyone could un-resolve a live distress alert.
+ALLOWED_SOS_TRANSITIONS = {
+    "ACTIVE": {"ACKNOWLEDGED", "RESPONDING", "RESOLVED"},
+    "ACKNOWLEDGED": {"RESPONDING", "RESOLVED"},
+    "RESPONDING": {"RESOLVED", "ACKNOWLEDGED"},
+    "RESOLVED": set(),
+}
+
+
 @router.post("/sos/{alert_id}")
 async def update_sos(alert_id: str, payload: SosUpdateIn):
     status = (payload.status or "").upper()
-    allowed = {"ACTIVE", "ACKNOWLEDGED", "RESPONDING", "RESOLVED"}
+    allowed = set(ALLOWED_SOS_TRANSITIONS)
     if status not in allowed:
         raise HTTPException(status_code=422, detail=f"Invalid SOS status '{status}'")
+
+    existing = db.get_sos_alert(alert_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    current = (existing.get("status") or "ACTIVE").upper()
+    if status != current and status not in ALLOWED_SOS_TRANSITIONS.get(current, set()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot move an SOS alert from {current} to {status}",
+        )
 
     alert = db.update_sos_alert(alert_id, status, payload.notes, payload.officer)
     if not alert:
@@ -206,26 +237,27 @@ async def update_sos(alert_id: str, payload: SosUpdateIn):
 
 
 @router.post("/sos")
-async def ingest_sos(payload: dict):
+async def ingest_sos(payload: SosIngestIn):
     """
     Intake endpoint for a citizen device reporting an active SOS session.
 
-    NOTE: the citizen app does not yet call this. Until it does, this endpoint
-    simply returns an empty feed. It exists so the officer side is complete and
-    so a future citizen-side change needs no backend work.
+    NOTE: the citizen app did not call this at all, so the officer SOS feed
+    could never be populated. It now accepts a validated, typed payload.
     """
-    alert_id = payload.get("session_id") or db.new_id("sos")
+    alert_id = payload.session_id or db.new_id("sos")
     alert = db.upsert_sos_alert(
         {
             "id": alert_id,
-            "status": "ACTIVE",
+            "status": (payload.status or "ACTIVE").upper(),
             "priority": "CRITICAL",
-            "lat": payload.get("lat"),
-            "lng": payload.get("lng"),
-            "accuracy": payload.get("accuracy"),
-            "contact_count": payload.get("contact_count") or 0,
-            "notes": payload.get("notes", "") or "",
-            "received_at": payload.get("received_at") or db.now_iso(),
+            "lat": payload.lat,
+            "lng": payload.lng,
+            "accuracy": payload.accuracy,
+            "contact_count": payload.contact_count,
+            "notes": payload.notes or "",
+            "received_at": db.now_iso(),
         }
     )
+    if not alert:
+        raise HTTPException(status_code=503, detail="Storage unavailable, alert not recorded")
     return {"ok": True, "alert": alert}

@@ -5,6 +5,7 @@ import { Card, Header, Pill, Screen, SectionTitle } from '../../components/ui';
 import { useTheme } from '../../lib/theme';
 import { useLocation, formatDistance, formatDuration, reverseGeocode, searchLocation, getRoute } from '../../lib/location';
 import { analyzeSafety } from '../../lib/safetyApi';
+import { offlineRouteFallback } from '../../lib/safetyFallbacks';
 import { useJourney } from '../../lib/journey';
 import { useRouter } from 'expo-router';
 import RouteMap from '../../components/RouteMap';
@@ -101,15 +102,18 @@ export default function RoutesScreen() {
         setSafetyData(best);
       } else if (baseRoute) {
         setRoute(baseRoute);
+        // The route itself resolved but the safety analysis did not. This used
+        // to invent a score of 80 / LOW with eight fabricated factor values
+        // (lighting 80, weather 90, ...) that looked like real measurements.
+        // It now comes from the shared offline fallback and is visibly flagged.
         const fallbackSafety = {
-          score: 80,
-          risk_level: 'LOW',
-          confidence: 0.8,
-          factors: { lighting: 80, road: 85, police: 60, hospital: 70, amenities: 75, weather: 90, time: 80, route: 85 },
-          segments: [],
+          ...offlineRouteFallback(
+            { lat: fromCoords.lat, lng: fromCoords.lng },
+            { lat: toCoords.lat, lng: toCoords.lng },
+            baseRoute.distanceKm,
+            baseRoute.durationMin,
+          ),
           coordinates: baseRoute.coordinates,
-          distanceKm: baseRoute.distanceKm,
-          durationMin: baseRoute.durationMin,
         };
         setAllRoutes([fallbackSafety]);
         setSelectedRouteIndex(0);

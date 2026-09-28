@@ -1,4 +1,5 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Link } from 'expo-router';
 import { AlertTriangle, Phone, X, ShieldAlert, StopCircle } from 'lucide-react-native';
 import { useTheme } from '../lib/theme';
 import { SOS_STATUS, useSOS } from '../lib/sos';
@@ -6,12 +7,19 @@ import { SOS_STATUS, useSOS } from '../lib/sos';
 export default function SOSConfirmationModal() {
   const { colors, isDark } = useTheme();
   const {
-    status, countdownValue, countdownRunning, contactCount,
+    status, countdownValue, countdownRunning, contactCount, error,
     cancelConfirmation, startCountdown, cancelCountdown, activateSOS,
   } = useSOS();
 
-  const visible = status === SOS_STATUS.CONFIRMING || status === SOS_STATUS.COUNTDOWN;
+  // ERROR must be included. With zero emergency contacts the provider set
+  // ERROR and a message, but the modal only rendered for CONFIRMING/COUNTDOWN,
+  // so it vanished instantly and the user never learned why nothing happened.
+  const visible =
+    status === SOS_STATUS.CONFIRMING ||
+    status === SOS_STATUS.COUNTDOWN ||
+    status === SOS_STATUS.ERROR;
   const isCountdown = status === SOS_STATUS.COUNTDOWN;
+  const isError = status === SOS_STATUS.ERROR;
 
   return (
     <Modal visible={visible} animationType="fade" transparent={true} onRequestClose={() => { if (!isCountdown) cancelConfirmation(); }}>
@@ -21,10 +29,24 @@ export default function SOSConfirmationModal() {
             <ShieldAlert color={colors.pink} size={28} />
           </View>
           <Text style={[s.title, { color: colors.ink }]}>
-            {isCountdown ? 'Activating SOS…' : 'Activate Emergency SOS?'}
+            {isError
+              ? 'Cannot start SOS yet'
+              : isCountdown
+              ? 'Activating SOS…'
+              : 'Activate Emergency SOS?'}
           </Text>
 
-          {isCountdown ? (
+          {isError ? (
+            <View style={s.confirmBody}>
+              <AlertTriangle color={colors.pink} size={18} />
+              <Text style={[s.confirmText, { color: colors.ink }]}>
+                {error || 'Add at least one emergency contact before activating SOS.'}
+              </Text>
+              <Text style={[s.bullet, { color: colors.muted }]}>
+                Add a contact so Safe-Her knows who to alert.
+              </Text>
+            </View>
+          ) : isCountdown ? (
             <View style={s.countRow}>
               <View style={[s.countRing, { borderColor: colors.pink }]}>
                 <Text style={[s.countText, { color: colors.pink }]}>{countdownValue}</Text>
@@ -61,7 +83,25 @@ export default function SOSConfirmationModal() {
           )}
 
           <View style={s.btnRow}>
-            {isCountdown ? (
+            {isError ? (
+              <>
+                <Pressable
+                  onPress={cancelConfirmation}
+                  style={({ pressed }) => [s.secondary, { backgroundColor: colors.paper, borderColor: colors.line }, pressed && s.pressed]}
+                >
+                  <X color={colors.ink} size={18} />
+                  <Text style={[s.secondaryText, { color: colors.ink }]}>Close</Text>
+                </Pressable>
+                <Link href="/emergency-contacts" asChild>
+                  <Pressable
+                    style={({ pressed }) => [s.primary, { backgroundColor: colors.pink }, pressed && s.pressed]}
+                  >
+                    <Phone color="#FFFFFF" size={18} />
+                    <Text style={s.primaryText}>Add contact</Text>
+                  </Pressable>
+                </Link>
+              </>
+            ) : isCountdown ? (
               <Pressable
                 onPress={cancelCountdown}
                 style={({ pressed }) => [s.secondary, { backgroundColor: colors.paper, borderColor: colors.line }, pressed && s.pressed]}

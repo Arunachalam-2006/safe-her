@@ -15,7 +15,6 @@ import {
 import {
   AlertTriangle,
   Check,
-  Clock3,
   MapPin,
   Radio,
   ShieldCheck,

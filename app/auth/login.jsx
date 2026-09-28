@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LogIn, Mail, UserRound } from 'lucide-react-native';
+import { LogIn, Mail } from 'lucide-react-native';
 import { useTheme } from '../../lib/theme';
 import { useAuth } from '../../lib/auth';
 import { supabaseConfigError } from '../../lib/supabase';

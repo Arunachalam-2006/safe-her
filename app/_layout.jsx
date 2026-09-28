@@ -12,6 +12,7 @@ import '../lib/backgroundLocationTask';
 import SOSConfirmationModal from '../components/SOSConfirmationModal';
 import SOSActiveScreen from '../components/SOSActiveScreen';
 import SplashScreen from '../components/SplashScreen';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 // ── DEVELOPER-ONLY ROLE BYPASS ──────────────────────────────────────────
 // Temporary: lets a developer preview the officer dashboard before the
@@ -163,17 +164,21 @@ const styles = StyleSheet.create({
 export default function RootLayout() {
   useFrameworkReady();
 
+  // Outermost wrapper: catches any render throw from any provider or screen.
+  // Without this, a release build shows a blank white screen.
   return (
-    <ThemeProvider>
-      <OnboardingProvider>
-        <AuthProvider>
-          <SOSProvider>
-            <JourneyProvider>
-              <RootNavigator />
-            </JourneyProvider>
-          </SOSProvider>
-        </AuthProvider>
-      </OnboardingProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <OnboardingProvider>
+          <AuthProvider>
+            <SOSProvider>
+              <JourneyProvider>
+                <RootNavigator />
+              </JourneyProvider>
+            </SOSProvider>
+          </AuthProvider>
+        </OnboardingProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

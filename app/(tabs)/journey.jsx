@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View, Platform } from 'react-native';
+import { Alert, Animated, Pressable, StyleSheet, Text, View, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   AlertTriangle, ChevronUp, ChevronDown, MapPin,
-  Navigation, PhoneCall, Share2, ShieldAlert,
+  Navigation, Share2, ShieldAlert,
   ShieldCheck, Square, Star,
 } from 'lucide-react-native';
 import { useAuth } from '../../lib/auth';
@@ -26,12 +26,24 @@ const riskColor = (level) => RISK_COLOR[level] ?? '#4285F4';
 const riskBg = (level) =>
   ({ LOW: '#E6F4EA', MODERATE: '#FEF7E0', HIGH: '#FCE8E6' })[level] ?? '#EAF0FD';
 
+/* Average speeds in km/h, mirroring the model used in lib/location.js so the
+ * ETA and the map's own duration estimate cannot disagree. */
+const MODE_SPEED_KMH = { walk: 5, bus: 18, car: 28, auto: 22, bike: 15 };
+const DEFAULT_SPEED_KMH = MODE_SPEED_KMH.car;
+
+function estimateEtaMinutes(distanceKm, mode) {
+  const speed = MODE_SPEED_KMH[mode] ?? DEFAULT_SPEED_KMH;
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return 1;
+  return Math.max(1, Math.round((distanceKm / speed) * 60));
+}
+
 /* ═══════════════════════════════════════════════════════════
    Main screen
 ═══════════════════════════════════════════════════════════ */
 export default function JourneyScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
+  const { profile } = useAuth();
   const { location, error: locError, tracking, startTracking, stopTracking } = useLiveLocation();
   const { activeJourney, setActiveJourney, updateCurrentSegment, clearJourney } = useJourney();
   const { status: sosStatus, requestSOS } = useSOS();
@@ -72,7 +84,10 @@ export default function JourneyScreen() {
       rem += haversineDistance(geom[i][0], geom[i][1], geom[i + 1][0], geom[i + 1][1]);
     }
     setRemainingKm(rem);
-    setEtaMin(Math.max(1, Math.round((rem / 40) * 60)));
+    /* ETA from the actual travel mode. This hardcoded 40 km/h regardless of
+     * mode, which over-estimated a car journey (lib/location.js models car at
+     * 28 km/h) by ~43% and ignored `activeJourney.mode` entirely. */
+    setEtaMin(estimateEtaMinutes(rem, activeJourney.mode));
 
     /* Current safety segment */
     const segs = activeJourney.segments ?? [];
@@ -107,6 +122,9 @@ export default function JourneyScreen() {
       features: activeJourney.features,
       startedAt: activeJourney.startedAt,
       completedAt: new Date().toISOString(),
+      // Scopes the journey so GET /journeys cannot return every user's
+      // origin/destination history to every caller.
+      owner_id: profile?.id ?? null,
     });
     setSavedOffline(result.offline);
     setActiveJourney({ status: 'completed', journeyId: result.journeyId });
@@ -125,6 +143,48 @@ export default function JourneyScreen() {
     if (sosStatus !== SOS_STATUS.ACTIVE && sosStatus !== SOS_STATUS.ACTIVATING) {
       requestSOS();
     }
+  }
+
+  /**
+   * Share the user's live location.
+   *
+   * The previous handler had `if (url && Platform.OS === 'web')` and nothing
+   * else, so on Android/iOS - the primary platforms - the button was a silent
+   * no-op. On web it called `navigator.clipboard.writeText` with no `.catch`,
+   * producing an unhandled rejection when permission was denied.
+   */
+  async function handleShareLocation() {
+    const shareUrl = location
+      ? `https://maps.google.com/?q=${location.lat},${location.lng}`
+      : activeJourney.destination?.label
+        ? `https://maps.google.com/?q=${encodeURIComponent(activeJourney.destination.label)}`
+        : '';
+    if (!shareUrl) {
+      Alert.alert('Nothing to share', 'Waiting for your location…');
+      return;
+    }
+
+    const message = `My live location: ${shareUrl}`;
+    try {
+      const { Share } = require('react-native');
+      if (Share && typeof Share.share === 'function') {
+        await Share.share({ message, url: shareUrl });
+        return;
+      }
+    } catch {
+      /* fall through to clipboard */
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message);
+        Alert.alert('Copied', 'Location link copied to your clipboard.');
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    Alert.alert('Share unavailable', 'Could not open the share sheet on this device.');
   }
 
   const status = activeJourney.status;
@@ -170,7 +230,7 @@ export default function JourneyScreen() {
           </Text>
           {savedOffline ? (
             <Text style={[s.completedSub, { color: '#EA4335', fontSize: 12 }]}>
-              {"Saved on your device — it will sync when you're back online."}
+              Saved on this device only. It has not been uploaded — the journey queue is retried on your next successful save.
             </Text>
           ) : null}
           {/* Star rating */}
@@ -208,6 +268,15 @@ export default function JourneyScreen() {
 
   return (
     <View style={s.navRoot}>
+      {/* locError was destructured but never rendered, so a failed
+          startTracking() was completely silent. */}
+      {locError ? (
+        <View style={[s.locErrorBar, { backgroundColor: isDark ? '#3B2F10' : '#FEF3C7' }]}>
+          <AlertTriangle color={isDark ? '#FBBF24' : '#B45309'} size={14} />
+          <Text style={[s.locErrorText, { color: colors.ink }]}>{locError}</Text>
+        </View>
+      ) : null}
+
       {/* ── FULL-SCREEN MAP ── */}
       <View style={s.mapFill}>
         <NavigationMap
@@ -215,7 +284,6 @@ export default function JourneyScreen() {
           travelledIdx={travelledIdx}
           liveLocation={location}
           destination={activeJourney.destination}
-          height="100%"
         />
       </View>
 
@@ -284,10 +352,14 @@ export default function JourneyScreen() {
           <View style={s.segList}>
             <Text style={[s.segTitle, { color: colors.muted }]}>Route Segments</Text>
             {(activeJourney.segments ?? []).slice(0, 5).map((seg, idx) => {
-              const isCurrent = seg.segment_id === activeJourney.currentSegmentIndex;
-              const isDone = seg.segment_id < activeJourney.currentSegmentIndex;
+              // `currentSegmentIndex` is an ARRAY INDEX (see the effect above),
+              // but it was being compared against `seg.segment_id`, which comes
+              // from the backend. The "You are here" marker therefore never
+              // appeared, and `<` compared a string id against a number.
+              const isCurrent = idx === activeJourney.currentSegmentIndex;
+              const isDone = idx < (activeJourney.currentSegmentIndex ?? 0);
               return (
-                <View key={idx} style={[s.segRow, isCurrent && { backgroundColor: riskBg(seg.risk_level) + '80' }]}>
+                <View key={seg.segment_id ?? idx} style={[s.segRow, isCurrent && { backgroundColor: riskBg(seg.risk_level) + '80' }]}>
                   <View style={[s.segDot, { backgroundColor: isDone ? colors.line : riskColor(seg.risk_level) }]} />
                   <Text style={[s.segText, { color: isCurrent ? riskColor(seg.risk_level) : colors.muted }]}>
                     Segment {idx + 1} · {seg.risk_level ?? 'OK'} · {seg.score ?? '—'}/100
@@ -312,12 +384,7 @@ export default function JourneyScreen() {
           </Pressable>
 
           <Pressable
-            onPress={() => {
-              const url = location
-                ? `https://maps.google.com/?q=${location.lat},${location.lng}`
-                : '';
-              if (url && Platform.OS === 'web') navigator.clipboard?.writeText(url);
-            }}
+            onPress={handleShareLocation}
             style={({ pressed }) => [s.actionBtn, { backgroundColor: '#4285F4' }, pressed && s.pressed]}
           >
             <Share2 color="#fff" size={18} />
@@ -357,6 +424,8 @@ const s = StyleSheet.create({
 
   /* ── Navigation layout ── */
   navRoot: { flex: 1, position: 'relative' },
+  locErrorBar: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  locErrorText: { flex: 1, fontSize: 12, lineHeight: 17 },
   mapFill: { ...StyleSheet.absoluteFillObject },
 
   /* ── Top HUD ── */

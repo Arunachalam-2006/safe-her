@@ -1,30 +1,35 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { ShieldCheck, TrendingUp, Zap, Sun, Droplets, Clock, Building2, Siren, AlertTriangle } from 'lucide-react-native';
+import { ShieldCheck, TrendingUp, Sun, Droplets, Clock, Siren, AlertTriangle, WifiOff } from 'lucide-react-native';
 import { Card, Pill } from './ui';
 import { useTheme } from '../lib/theme';
+import { OFFLINE_SCORE, OFFLINE_LABEL, OFFLINE_CONFIDENCE } from '../lib/safetyFallbacks';
 
 /**
  * SafetyScore card — renders the live safety score with real factor chips.
  *
  * Props:
- *   score      — numeric 0-100 (default 88)
+ *   score      — numeric 0-100
  *   label      — human-readable status string
- *   factors    — { lighting, police, hospital, amenities, weather, time } (0-100)
+ *   factors    — { lighting, police, hospital, amenities, weather, time } (0-100),
+ *                or null when there is no real measurement
  *   confidence — 0.0–1.0  (used for "Updated" line)
  *   loading    — show loading shimmer instead of data
  *   offline    — true when the score was generated from a fallback
+ *   degraded   — true when the engine returned a score but flagged some data
+ *                sources as unavailable (Overpass / weather outage)
  */
 export function SafetyScore({
-  score = 88,
-  label = 'Safe Zone',
+  score = OFFLINE_SCORE,
+  label = OFFLINE_LABEL,
   factors = null,
   confidence = null,
   loading = false,
   offline = false,
+  degraded = false,
 }) {
   const { colors, isDark } = useTheme();
-  const numericScore = typeof score === 'number' ? score : parseInt(score, 10) || 85;
+  const numericScore = Number.isFinite(Number(score)) ? Number(score) : OFFLINE_SCORE;
   const isHighSafety = numericScore >= 75;
 
   const progressColor = isHighSafety
@@ -36,7 +41,7 @@ export function SafetyScore({
   const pillTone = isHighSafety ? 'teal' : numericScore >= 50 ? 'orange' : 'pink';
 
   // Build dynamic factor chips from real data
-  const factorChips = _buildFactorChips(factors, colors);
+  const factorChips = _buildFactorChips(factors, colors, offline || degraded);
 
   // Confidence label
   const confidenceLabel = confidence != null
@@ -46,6 +51,10 @@ export function SafetyScore({
         ? 'Moderate confidence'
         : 'Low confidence'
     : null;
+
+  // A degraded response still has a real score, but some inputs were missing,
+  // so it must not be presented as a fully live analysis.
+  const notLive = offline || degraded;
 
   return (
     <Card
@@ -59,7 +68,9 @@ export function SafetyScore({
     >
       <View style={styles.top}>
         <View>
-          <Text style={[styles.label, { color: isDark ? '#8B949E' : '#AAB8CD' }]}>LIVE SAFETY INDEX</Text>
+          <Text style={[styles.label, { color: isDark ? '#8B949E' : '#AAB8CD' }]}>
+            {notLive ? 'SAFETY INDEX · ESTIMATE' : 'LIVE SAFETY INDEX'}
+          </Text>
           {loading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator size="large" color={colors.primary} />
@@ -93,7 +104,7 @@ export function SafetyScore({
         />
       </View>
 
-      {/* Factor Chips — real data or defaults */}
+      {/* Factor Chips — real data, or an explicit "no data" chip */}
       <View style={styles.factorsRow}>
         {factorChips.map((chip, i) => (
           <View key={i} style={[styles.factorChip, { backgroundColor: isDark ? '#1C2938' : '#1C2C46' }]}>
@@ -108,8 +119,13 @@ export function SafetyScore({
         <View style={styles.metaItem}>
           {offline ? (
             <>
-              <AlertTriangle color={colors.orange} size={15} />
+              <WifiOff color={colors.orange} size={15} />
               <Text style={[styles.metaText, { color: colors.orange }]}>Offline estimate</Text>
+            </>
+          ) : degraded ? (
+            <>
+              <AlertTriangle color={colors.orange} size={15} />
+              <Text style={[styles.metaText, { color: colors.orange }]}>Partial data</Text>
             </>
           ) : (
             <>
@@ -121,7 +137,7 @@ export function SafetyScore({
           )}
         </View>
         <Text style={[styles.updated, { color: isDark ? '#8B949E' : '#8D9DB5' }]}>
-          {loading ? 'Loading...' : 'Updated just now'}
+          {loading ? 'Loading...' : notLive ? 'Not a live reading' : 'Updated just now'}
         </Text>
       </View>
     </Card>
@@ -129,15 +145,17 @@ export function SafetyScore({
 }
 
 /**
- * Build factor chip data from real factors object.
+ * Build factor chip data from the real factors object.
+ *
+ * When there is no measurement this previously returned three hardcoded chips —
+ * "3 Patrols Nearby", "95% Lit", "Verified Zone" — which rendered as confident
+ * factual claims precisely when the app knew nothing (offline / partial data).
+ * It now says so.
  */
-function _buildFactorChips(factors, colors) {
-  if (!factors) {
-    // Legacy fallback — show static chips
+function _buildFactorChips(factors, colors, noData) {
+  if (noData || !factors) {
     return [
-      { icon: <Zap color={colors.teal} size={12} />, text: '3 Patrols Nearby' },
-      { icon: <Sun color={colors.yellow} size={12} />, text: '95% Lit' },
-      { icon: <ShieldCheck color={colors.blue} size={12} />, text: 'Verified Zone' },
+      { icon: <WifiOff color={colors.muted} size={12} />, text: 'No live data' },
     ];
   }
 

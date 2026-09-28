@@ -52,14 +52,23 @@ export default function ProfileScreen() {
   const initial = (profile?.full_name || profile?.email || 'U').charAt(0).toUpperCase();
 
   async function pickPhoto() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.9,
-    });
-    if (!result.canceled) {
-      await updateProfile({ avatar_url: result.assets[0].uri });
+    try {
+      // Previously no permission request and no bounds check: a denied
+      // permission was an unhandled rejection and an empty `assets` array
+      // threw a TypeError on `result.assets[0].uri`.
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm?.granted) return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+      if (!result?.canceled && result.assets?.length) {
+        await updateProfile({ avatar_url: result.assets[0].uri });
+      }
+    } catch {
+      /* the user can retry; never crash the profile screen */
     }
   }
 

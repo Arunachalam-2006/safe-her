@@ -6,22 +6,22 @@ Used by the Home Page to display the user's current area safety.
 
 import logging
 import asyncio
-from datetime import datetime
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services.overpass_service import _build_query, _categorize_elements, OVERPASS_URL, OVERPASS_HEADERS
 from services.weather_service import fetch_weather
+from services.feature_service import local_hour_and_weekday
 
 router = APIRouter(prefix="/safety", tags=["safety"])
 
 
 class SpotRequest(BaseModel):
-    lat: float
-    lng: float
+    lat: float = Field(..., ge=-90.0, le=90.0, allow_inf_nan=False)
+    lng: float = Field(..., ge=-180.0, le=180.0, allow_inf_nan=False)
 
 
-def _score_spot(infra: dict, weather: dict) -> dict:
+def _score_spot(infra: dict, weather: dict, lng_hint: float | None = None) -> dict:
     """
     Score a single location using infrastructure + weather + time factors.
     Returns a result dict with score, risk_level, confidence, factors, and label.
@@ -70,26 +70,37 @@ def _score_spot(infra: dict, weather: dict) -> dict:
     wind_kmh = weather.get("windspeed", 0.0)
     weather_code = weather.get("weathercode", 0)
 
-    w_score = 1.0
-    if rain_mm > 5:       w_score -= 0.30
-    elif rain_mm > 0:     w_score -= 0.10
-    if visibility_m < 1000:   w_score -= 0.30
-    elif visibility_m < 5000: w_score -= 0.15
-    if wind_kmh > 50:     w_score -= 0.20
-    elif wind_kmh > 30:   w_score -= 0.10
-    if weather_code >= 80: w_score -= 0.20
-    w_score = max(0.0, w_score)
+    # A failed weather fetch returns neutral values that previously scored a
+    # perfect 1.0, making an outage look like ideal conditions.
+    if weather.get("degraded"):
+        w_score = 0.60
+    else:
+        w_score = 1.0
+        if rain_mm > 5:       w_score -= 0.30
+        elif rain_mm > 0:     w_score -= 0.10
+        if visibility_m < 1000:   w_score -= 0.30
+        elif visibility_m < 5000: w_score -= 0.15
+        if wind_kmh > 50:     w_score -= 0.20
+        elif wind_kmh > 30:   w_score -= 0.10
+        if weather_code >= 80: w_score -= 0.20
+        w_score = max(0.0, w_score)
 
-    # 6. TIME-OF-DAY
-    now = datetime.now()
-    hour = now.hour
-    dow = now.weekday()
-    if 6 <= hour <= 20:     time_score = 1.0
-    elif 20 <= hour <= 22:  time_score = 0.75
-    elif 22 <= hour <= 23:  time_score = 0.55
+    # 6. TIME-OF-DAY - local to the queried point, and using the SAME bands as
+    # services/feature_service.py. The two copies previously disagreed: this one
+    # used the server clock and `is_night = hour >= 18`, the other used the
+    # server clock and `hour >= 19`, so the same hour scored differently
+    # depending on which endpoint answered.
+    hour, dow = local_hour_and_weekday(lng_hint)
+    if 6 <= hour < 20:      time_score = 1.0
+    elif 20 <= hour < 22:   time_score = 0.75
+    elif 22 <= hour < 23:   time_score = 0.55
     else:                   time_score = 0.45
     if dow >= 5:
         time_score *= 0.95
+
+    # A failed Overpass lookup returns zeroed counts. Those must not be scored
+    # as measurements, and must be distinguishable from a real result.
+    infra_degraded = bool(infra.get("error")) or bool(infra.get("degraded"))
 
     # Calculate weighted total
     factors = {
@@ -112,7 +123,8 @@ def _score_spot(infra: dict, weather: dict) -> dict:
     else:                   risk_level = "HIGH"
 
     # Human-readable label
-    is_night = hour >= 18 or hour < 6
+    # Same night definition as services/feature_service.py (hour >= 19 or < 6).
+    is_night = hour >= 19 or hour < 6
     if final_score >= 85:
         label = "High Safety Zone"
     elif final_score >= 70:
@@ -125,7 +137,10 @@ def _score_spot(infra: dict, weather: dict) -> dict:
     # Confidence
     total_elements = infra.get("total_elements", 0)
     confidence = 0.90
-    if total_elements == 0:
+    if infra_degraded:
+        # Unknown data must not look like a confident measurement.
+        confidence = 0.30
+    elif total_elements == 0:
         confidence = 0.50
     elif lamps == 0:
         confidence -= 0.15
@@ -137,7 +152,9 @@ def _score_spot(infra: dict, weather: dict) -> dict:
         "score": final_score,
         "risk_level": risk_level,
         "label": label,
-        "confidence": round(max(0.5, confidence), 2),
+        # Floor lowered from 0.5 so a genuinely degraded result is visible.
+        "confidence": round(max(0.25, confidence), 2),
+        "degraded": bool(infra_degraded or weather.get("degraded")),
         "factors": factors_display,
         "details": {
             "street_lamps": lamps,
@@ -150,6 +167,7 @@ def _score_spot(infra: dict, weather: dict) -> dict:
             "hour": hour,
             "is_night": is_night,
             "is_weekend": dow >= 5,
+            "infra_degraded": infra_degraded,
         },
     }
 
@@ -192,20 +210,22 @@ async def spot_safety(req: SpotRequest):
         weather = results[1]
 
     except Exception as e:
-        logging.warning(f"Spot safety data fetch failed: {e}")
-        # Return a degraded result rather than error
+        logging.warning("Spot safety data fetch failed: %s", e)
+        # Return a degraded result rather than error. The `degraded` flag is
+        # what stops these zeros being read as "nothing is nearby".
         infra = {
             "street_lamps": 0, "police": 0, "hospitals": 0,
             "clinics": 0, "pharmacies": 0, "shops": 0,
             "restaurants": 0, "bus_stops": 0, "total_elements": 0,
+            "degraded": True, "error": str(e)[:200],
         }
         weather = {
             "temperature": 25.0, "precipitation": 0.0, "rain": 0.0,
             "visibility": 10000.0, "windspeed": 5.0, "weathercode": 0,
-            "cloudcover": 30.0,
+            "cloudcover": 30.0, "degraded": True,
         }
 
-    result = _score_spot(infra, weather)
+    result = _score_spot(infra, weather, lng_hint=req.lng)
     result["lat"] = req.lat
     result["lng"] = req.lng
 

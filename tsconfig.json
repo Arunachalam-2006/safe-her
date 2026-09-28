@@ -2,7 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
     "jsx": "react-jsx",
+    "skipLibCheck": true,
     "paths": {
       "@/*": [
         "./*"
@@ -12,5 +15,13 @@
   "include": [
     "**/*.js",
     "**/*.jsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".expo",
+    "android",
+    "ios",
+    "safety-engine"
   ]
 }

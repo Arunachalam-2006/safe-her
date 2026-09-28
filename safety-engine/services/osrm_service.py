@@ -6,8 +6,13 @@ then splits it into N equal-length segments with midpoint + road type data.
 import math
 import httpx
 
-OSRM_BASE = "http://router.project-osrm.org/route/v1"
+# HTTPS, not HTTP. A user's origin and destination - exactly the coordinates a
+# safety app exists to protect - were travelling in cleartext, and the returned
+# route was attacker-modifiable in transit. Every other integration here already
+# used TLS.
+OSRM_BASE = "https://router.project-osrm.org/route/v1"
 PROFILE_MAP = {"driving": "driving", "walking": "foot", "cycling": "bike"}
+VALID_MODES = frozenset(PROFILE_MAP)
 
 
 def _haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -92,7 +97,13 @@ async def fetch_route(
             }
         ]
     """
-    profile = PROFILE_MAP.get(mode, "driving")
+    # Previously `PROFILE_MAP.get(mode, "driving")`, so an unknown mode such as
+    # "scooting" silently produced a DRIVING route and scored it as one.
+    if mode not in PROFILE_MAP:
+        raise ValueError(
+            f"Unsupported travel mode '{mode}'. Expected one of {sorted(VALID_MODES)}."
+        )
+    profile = PROFILE_MAP[mode]
     url = (
         f"{OSRM_BASE}/{profile}/{origin_lng},{origin_lat};{dest_lng},{dest_lat}"
         f"?overview=full&geometries=geojson&steps=true&annotations=true&alternatives=true"

@@ -3,6 +3,8 @@ Weather Service — fetches current weather conditions from Open-Meteo API.
 Called once per analysis using the route origin coordinates.
 """
 
+import logging
+
 import httpx
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
@@ -45,10 +47,12 @@ async def fetch_weather(lat: float, lng: float) -> dict:
             "windspeed": current.get("windspeed_10m", 0.0),
             "weathercode": current.get("weathercode", 0),
             "cloudcover": current.get("cloudcover", 0.0),
+            "degraded": False,
         }
     except Exception as e:
-        print(f"Weather fetch failed: {e}")
-        # Return neutral defaults so scoring can still proceed
+        logging.warning("Weather fetch failed: %s", e)
+        # Neutral values, but flagged. The scorer previously read these as
+        # *ideal* weather, so an outage was indistinguishable from a clear day.
         return {
             "temperature": 25.0,
             "precipitation": 0.0,
@@ -57,4 +61,6 @@ async def fetch_weather(lat: float, lng: float) -> dict:
             "windspeed": 5.0,
             "weathercode": 0,
             "cloudcover": 30.0,
+            "degraded": True,
+            "error": str(e)[:200],
         }

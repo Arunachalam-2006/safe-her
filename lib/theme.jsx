@@ -18,6 +18,11 @@ export const blossomTheme = {
     primarySoft: '#F3E8FF',   // Lavender tint
     teal: '#059669',          // Safe Green/Teal
     tealSoft: '#ECFDF5',
+    green: '#059669',         // Success green (alias used by SOS status banner)
+    greenSoft: '#ECFDF5',
+    amber: '#B45309',         // Warning amber - readable on a light surface
+    amberSoft: '#FEF3C7',
+    pageBg: '#FFF7F9',        // Page background (journey idle/completed roots)
     pink: '#EC4899',          // Vibrant Rose Magenta
     pinkSoft: '#FDF2F8',
     orange: '#F97316',        // Coral Orange
@@ -54,6 +59,11 @@ export const midnightTheme = {
     primarySoft: '#134E4A',   // Cyan deep tint
     teal: '#2DD4BF',          // Cyan Teal
     tealSoft: '#134E4A',
+    green: '#34D399',         // Success green (SOS status banner)
+    greenSoft: '#123528',
+    amber: '#FBBF24',         // Warning amber - readable on a dark surface
+    amberSoft: '#3B2F10',
+    pageBg: '#0D1117',        // Page background
     pink: '#FB7185',          // Neon Rose
     pinkSoft: '#4C1D24',
     orange: '#FB923C',        // Soft Neon Orange
@@ -81,7 +91,6 @@ const ThemeContext = createContext({
   colors: blossomTheme.colors,
   isDark: false,
 });
-
 export function ThemeProvider({ children }) {
   const [themeName, setThemeName] = useState('blossom');
 
