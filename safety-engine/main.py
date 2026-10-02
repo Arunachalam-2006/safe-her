@@ -51,9 +51,34 @@ ALLOWED_ORIGINS = [
     if o.strip()
 ]
 
+# Local origins on ANY port, plus RFC1918 / loopback addresses.
+#
+# The fixed list above was not enough: browsing the web app at
+# http://192.168.0.6:8081 instead of http://localhost:8081 sent an Origin the
+# engine rejected, and the browser reports a CORS rejection as "Failed to
+# fetch" - indistinguishable, client-side, from the engine being switched off.
+# That produced the misleading "can't reach the safety engine" message while
+# the engine was running perfectly.
+#
+# This does NOT weaken the protection that motivated the restriction. A browser
+# sets Origin from the page's real origin, so a malicious site cannot claim to
+# be localhost or a private IP: it would have to actually be served from one.
+# The remaining exposure is other devices on the same LAN, which is the
+# intended local test setup. Set SAFEH_ALLOWED_ORIGINS to pin an exact list in
+# any deployment that is reachable beyond the local network.
+LOCAL_ORIGIN_REGEX = (
+    r"^https?://("
+    r"localhost|127\.0\.0\.1|\[::1\]"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")(:\d{1,5})?$"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=LOCAL_ORIGIN_REGEX,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Officer-Key"],

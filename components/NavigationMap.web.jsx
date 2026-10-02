@@ -2,10 +2,12 @@ import { useEffect, useRef } from 'react';
 import { MapContainer, Marker, Polyline, TileLayer, useMap, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { tileUrlTemplate, tileAttribution, tileLayerOptions } from '../lib/mapTiles';
 
-/* ─── Map style tiles (CartoDB dark for navigation feel) ─── */
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+/* ─── Map tiles: MapTiler supplies imagery, OSRM still supplies the route ─── */
+const TILE_URL = tileUrlTemplate('outdoor');
+const TILE_ATTR = tileAttribution();
+const TILE_OPTS = tileLayerOptions('outdoor');
 
 /* ─── Custom icons ─── */
 const liveLocationIcon = () =>
@@ -129,7 +131,7 @@ export default function NavigationMap({
         attributionControl={false}
         style={{ height: '100%', width: '100%' }}
       >
-        <TileLayer url={TILE_URL} attribution={TILE_ATTR} />
+        <TileLayer url={TILE_URL} attribution={TILE_ATTR} {...TILE_OPTS} />
 
         {/* Travelled segment – muted grey */}
         {travelledCoords.length > 1 && (

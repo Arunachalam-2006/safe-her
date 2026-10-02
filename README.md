@@ -189,10 +189,16 @@ Each route segment is scored 0–100 from eight normalized factors, then length-
 cd safety-engine
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+
+# --host 0.0.0.0 is REQUIRED for a physical device.
+# Without it uvicorn binds 127.0.0.1 only, so the LAN IP in .env is not served
+# and the phone cannot reach the engine at all.
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-> Engine live at `http://localhost:8000` · health check at `/health` · interactive docs at `/docs`
+> Engine live at `http://localhost:8000` (or `http://<your-lan-ip>:8000` from a device) · health check at `/health` · interactive docs at `/docs`
+>
+> Windows firewall may prompt on first bind — allow it on the **Private** network, or the phone still cannot connect.
 
 ### 2 — The App (Expo)
 
@@ -209,8 +215,10 @@ Then press **`w`** for web, or scan the QR code with **Expo Go** on your phone.
 <br/>
 
 - Copy `.env.example` → `.env` and fill in any public tokens.
-- The app calls the engine at `http://localhost:8000`. On a **physical device**, point it at your machine's LAN IP (e.g. `http://192.168.x.x:8000`) so the phone can reach the engine.
-- Available scripts: `npm run dev` · `npm run build:web` · `npm run lint` · `npm run typecheck`.
+- The env var is `EXPO_PUBLIC_SAFETY_API_URL` (read by `lib/config.js`).
+- Web / simulator: `http://localhost:8000` works out of the box.
+- **Physical device:** set it to your machine's LAN IP (e.g. `http://192.168.1.42:8000`) **and** start the engine with `--host 0.0.0.0` (`npm run engine`). Both are required — the default `127.0.0.1` bind is not reachable from a phone.
+- Available scripts: `npm run dev` · `npm run dev:web` · `npm run engine` · `npm run build:web` · `npm run lint` · `npm run typecheck` · `npm run test:engine`.
 
 </details>
 

@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
+import {
+  tileUrlTemplate,
+  tileAttribution,
+  tileLayerOptions,
+} from '../lib/mapTiles';
 
 /**
  * Native NavigationMap — renders a live Leaflet map inside a WebView.
@@ -61,10 +66,14 @@ export default function NavigationMap({
   var destPos         = ${JSON.stringify(destPos)};
   var center          = ${JSON.stringify(center)};
 
-  var map = L.map('map', { zoomControl: false, attributionControl: false });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19
-  }).addTo(map);
+  var map = L.map('map', { zoomControl: false, attributionControl: true });
+  // MapTiler imagery; the route itself still comes from OSRM via the engine.
+  // outdoor-v2 has stronger contrast, which matters when following a route
+  // on a phone in daylight.
+  L.tileLayer('${tileUrlTemplate('outdoor')}', ${JSON.stringify({
+    ...tileLayerOptions('outdoor'),
+    attribution: tileAttribution(),
+  })}).addTo(map);
   map.setView(center, livePos ? 16 : 13);
 
   // Route outline (depth)

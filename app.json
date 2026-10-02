@@ -52,6 +52,14 @@
           "isAndroidForegroundServiceEnabled": true,
           "isIosBackgroundLocationEnabled": true
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "experiments": {

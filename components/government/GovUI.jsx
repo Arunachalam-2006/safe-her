@@ -155,17 +155,29 @@ export function PriorityBadge({ priority, size = 'md' }) {
 /* ── Header ─────────────────────────────────────────────────────────── */
 
 export function GovHeader({ agency, subtitle, onSignOut }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+
+  // This bar is DARK in both themes, because the text sitting on it is light
+  // (periwinkle / white). It used to take its background from `colors.ink`,
+  // which is a TEXT token: `#1E1B4B` navy in Blossom but `#F0F6FC` near-white
+  // in Midnight. In dark mode the band turned white and the hardcoded
+  // `#FFFFFF` title was white-on-white, i.e. invisible.
+  const headerBg = isDark ? colors.surfaceElevated : colors.ink;
+  // Light-on-dark equivalents for the Midnight palette. The Blossom values stay
+  // in the stylesheet, so light mode renders exactly as before.
+  const onHeader = isDark ? colors.ink : '#FFFFFF';
+  const eyebrow = isDark ? colors.primary : '#A5B4FC';
+  const sub = isDark ? colors.muted : '#C7D2FE';
 
   return (
-    <View style={[styles.header, { backgroundColor: colors.ink, borderBottomColor: colors.line }]}>
+    <View style={[styles.header, { backgroundColor: headerBg, borderBottomColor: colors.line }]}>
       <View style={styles.headerRow}>
         <View style={[styles.headerMark, { backgroundColor: colors.primarySoft }]}>
           <Building2 color={colors.primary} size={20} />
         </View>
         <View style={styles.headerTextWrap}>
-          <Text style={styles.headerEyebrow}>Safe-Her · Response Desk</Text>
-          <Text style={styles.headerAgency} numberOfLines={1}>
+          <Text style={[styles.headerEyebrow, { color: eyebrow }]}>Safe-Her · Response Desk</Text>
+          <Text style={[styles.headerAgency, { color: onHeader }]} numberOfLines={1}>
             {agency || 'Government Dashboard'}
           </Text>
         </View>
@@ -178,11 +190,13 @@ export function GovHeader({ agency, subtitle, onSignOut }) {
             android_ripple={{ color: colors.primary, borderless: true, radius: 24 }}
             style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
           >
-            <LogOut color={colors.ink} size={18} />
+            {/* Was `colors.ink`, which is the same value as the band it sits
+                on, so the icon was invisible whenever sign-out was rendered. */}
+            <LogOut color={onHeader} size={18} />
           </Pressable>
         ) : null}
       </View>
-      {subtitle ? <Text style={styles.headerSub}>{subtitle}</Text> : null}
+      {subtitle ? <Text style={[styles.headerSub, { color: sub }]}>{subtitle}</Text> : null}
     </View>
   );
 }

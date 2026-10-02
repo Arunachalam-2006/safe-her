@@ -6,11 +6,16 @@ Orchestrates OSRM → Overpass (parallel) → Weather → Feature → Scoring pi
 import logging
 import asyncio
 import math
-from typing import Literal
+from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from services.osrm_service import fetch_route
+from services.osrm_service import (
+    fetch_route,
+    _build_route_record,
+    _polyline_length_m,
+    MAX_ROUTES,
+)
 from services.overpass_service import fetch_infrastructure
 from services.weather_service import fetch_weather
 from services.feature_service import prepare_analysis_features
@@ -144,4 +149,170 @@ async def analyze_route(req: AnalyzeRequest):
 
         analyzed_routes.append(result)
 
-    return analyzed_routes
+    # Requirement is ~2-3 options, not an unbounded list. Capping here keeps the
+    # Overpass fan-out (segments x routes) bounded as well.
+    return analyzed_routes[:MAX_ROUTES]
+
+
+class RoutesRequest(BaseModel):
+    origin: Coords
+    destination: Coords
+    mode: TravelMode = "driving"
+
+
+class ScoreRouteRequest(BaseModel):
+    """Score ONE route whose geometry the client already has."""
+
+    coordinates: list[tuple[float, float]]
+    origin: Coords
+    destination: Coords
+    mode: TravelMode = "driving"
+    num_segments: int = Field(5, ge=1, le=10)
+    # Sent back from /safety/routes so scoring uses the routing step's own
+    # turn count and road types rather than losing them.
+    turn_count: Optional[int] = Field(default=None, ge=0, le=100_000)
+    segments: Optional[list[dict]] = None
+
+
+@router.post("/score")
+async def score_single_route(req: ScoreRouteRequest):
+    """
+    Score a single route geometry. Skips routing entirely.
+
+    This is the progressive-scoring half of the UX: the client calls
+    /safety/routes first (fast, ~2s) to draw the options, then calls this once
+    per route so a safety outage on one route never blocks the others, and the
+    map is never blocked waiting for a score.
+    """
+    coords_lnglat = [[lng, lat] for lat, lng in req.coordinates]
+    if len(coords_lnglat) < 2:
+        raise HTTPException(status_code=422, detail="A route needs at least two points")
+
+    distance_m = _polyline_length_m(coords_lnglat)
+    if distance_m <= 0:
+        raise HTTPException(status_code=422, detail="Route geometry has zero length")
+
+    # Reuse the segments and turn count produced by the routing step when the
+    # client sends them back from /safety/routes.
+    #
+    # Rebuilding purely from geometry silently DESTROYED the two factors that
+    # actually vary between routes: `turn_count` (which drives turns_per_km ->
+    # the `route` factor) and the per-segment `road_types` (which drive the
+    # `road` factor). With both stuck at a constant, every alternative scored
+    # identically - which defeats per-route scoring entirely and made all three
+    # routes look like the same road.
+    if req.segments:
+        route_data = {
+            "geometry": coords_lnglat,
+            "distance_m": distance_m,
+            "duration_s": 0.0,
+            "turn_count": int(req.turn_count or 0),
+            "segments": req.segments,
+        }
+    else:
+        route_data = _build_route_record(
+            {
+                "geometry": coords_lnglat,
+                "distance_m": distance_m,
+                # Duration is not derivable from geometry alone; the client
+                # already has a routing duration and keeps it.
+                "duration_s": 0.0,
+                "legs": [],
+            },
+            req.num_segments,
+        )
+
+    degraded_reasons: list[str] = []
+    try:
+        weather_task = fetch_weather(req.origin.lat, req.origin.lng)
+        infra_task = fetch_infrastructure(route_data["segments"])
+        results = await asyncio.wait_for(
+            asyncio.gather(weather_task, infra_task), timeout=25.0
+        )
+        weather = results[0] or {}
+        infra_results = results[1] or []
+        if not weather:
+            degraded_reasons.append("weather")
+        if not infra_results or any(
+            isinstance(i, dict) and i.get("error") for i in infra_results
+        ):
+            degraded_reasons.append("infrastructure")
+    except Exception as e:  # noqa: BLE001
+        logging.warning("Single-route scoring degraded: %s", e)
+        degraded_reasons.append("infrastructure")
+        weather = {}
+        infra_results = [
+            {"total_elements": 0, "street_lamps": 0, "police": 0, "error": str(e)}
+            for _ in route_data["segments"]
+        ]
+
+    features_input = prepare_analysis_features(
+        segments=route_data["segments"],
+        infra_results=infra_results,
+        weather=weather,
+        turn_count=route_data["turn_count"],
+        distance_m=route_data["distance_m"],
+    )
+    result = await analyze_safety(features_input)
+
+    result["coordinates"] = [[pt[1], pt[0]] for pt in route_data["geometry"]]
+    result["distanceKm"] = distance_m / 1000.0
+    result["durationMin"] = None  # caller keeps the routing duration it already has
+    result["routeIndex"] = 0
+    result["degraded"] = bool(degraded_reasons)
+    if degraded_reasons:
+        result["degraded_sources"] = sorted(set(degraded_reasons))
+        result["confidence"] = min(result.get("confidence", 1.0), 0.35)
+
+    return result
+
+
+@router.post("/routes")
+async def route_options(req: RoutesRequest):
+    """
+    Routing only - NO safety analysis.
+
+    Returns up to 3 distinct routes with geometry, distance and ETA so the map
+    can draw them almost immediately, while safety scores are still being
+    fetched. This is what makes the progressive-scoring UX possible: the client
+    calls this first, shows the options on the map, then scores each one
+    separately via POST /safety/analyze.
+
+    Typically ~2s, versus ~15s for a full scored analysis of three routes.
+    """
+    try:
+        routes_data = await fetch_route(
+            req.origin.lat,
+            req.origin.lng,
+            req.destination.lat,
+            req.destination.lng,
+            req.mode,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        logging.exception("Routing failed")
+        raise HTTPException(status_code=502, detail="Routing service unavailable")
+
+    return {
+        "routes": [
+            {
+                "routeIndex": idx,
+                # [[lat, lng]] to match the shape the app already expects.
+                "coordinates": [[pt[1], pt[0]] for pt in r["geometry"]],
+                "distanceKm": r["distance_m"] / 1000.0,
+                "durationMin": max(1, round(r["duration_s"] / 60.0)),
+                # Handed back to /safety/score so the two per-route-varying
+                # factors (turn count and road types) survive the round trip.
+                "turn_count": r["turn_count"],
+                "segments": r["segments"],
+                # Signal that no score exists yet, so the client must not
+                # render "0" or inherit a previous route's score.
+                "scored": False,
+                "score": None,
+                "risk_level": None,
+            }
+            for idx, r in enumerate(routes_data)
+        ],
+        "count": len(routes_data),
+    }

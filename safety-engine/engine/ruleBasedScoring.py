@@ -16,6 +16,9 @@ def rule_based_scoring(features_input: dict) -> dict:
     }
 
     final_segments = []
+    # Per-segment factors, kept so the zero-length path below can average them
+    # instead of relying on whatever the loop variable last held.
+    segment_factors = []
     total_length = 0.0
     weighted_score_sum = 0.0
     
@@ -33,6 +36,7 @@ def rule_based_scoring(features_input: dict) -> dict:
             raw_score += factor_score * weight
             global_factors[k] += factor_score * seg["length_m"]
 
+        segment_factors.append({k: factors.get(k, 0.0) for k in WEIGHTS})
         segment_score = round(raw_score * 100)
         
         risk_level = "HIGH"
@@ -66,10 +70,26 @@ def rule_based_scoring(features_input: dict) -> dict:
         for k in global_factors:
             global_factors[k] = int(round((global_factors[k] / total_length) * 100))
     elif segments_data:
-        # Segments exist but all have zero length: keep the last segment's
-        # factors rather than dividing by zero.
-        final_route_score = 0
-        global_factors = {k: int(round(factors[k] * 100)) for k in WEIGHTS.keys()}
+        # Segments exist but every length_m is 0 or missing, so the
+        # length-weighted average above is undefined. This happens whenever a
+        # client posts `segments` without lengths - /safety/score trusts the
+        # client's segments to preserve turn_count and road_types.
+        #
+        # The old code returned `final_route_score = 0` here, which is both
+        # wrong and dangerous: the per-segment scores in the same payload read
+        # e.g. 59, so the response claimed a HIGH-risk 0 while its own segments
+        # said otherwise. An unweighted mean of the segment scores is the
+        # honest answer when the lengths are missing.
+        final_route_score = int(round(
+            sum(s["score"] for s in final_segments) / len(final_segments)
+        ))
+        # Likewise, average the per-segment factors instead of taking only the
+        # last segment's (which is what the loop variable happened to hold).
+        n = len(segment_factors)
+        for k in global_factors:
+            global_factors[k] = int(round(
+                sum(sf.get(k, 0.0) for sf in segment_factors) / n * 100
+            ))
     else:
         # No usable segments at all - this happens when every infrastructure
         # lookup timed out. Previously this raised UnboundLocalError on `factors`

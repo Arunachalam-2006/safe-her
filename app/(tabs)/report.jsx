@@ -20,6 +20,10 @@ export default function ReportScreen() {
   const [location, setLocation] = useState('');
   const [details, setDetails] = useState('');
   const [imageUri, setImageUri] = useState(null);
+  // The full picker asset, kept alongside the URI purely so the 4 MB check has
+  // a real `fileSize` to test before the file is read into memory. `imageUri`
+  // still drives the preview, so nothing about the existing UI changes.
+  const [imageAsset, setImageAsset] = useState(null);
   const [status, setStatus] = useState({ type: 'idle', message: '' });
 
   async function pickPhoto() {
@@ -38,6 +42,7 @@ export default function ReportScreen() {
       // `result.assets[0]` was accessed with no bounds check.
       if (!result?.canceled && result.assets?.length) {
         setImageUri(result.assets[0].uri);
+        setImageAsset(result.assets[0]);
       }
     } catch {
       setStatus({ type: 'error', message: 'Could not open your photo library.' });
@@ -68,19 +73,20 @@ export default function ReportScreen() {
       location_label: location.trim(),
       details: details.trim(),
       image_uri: imageUri,
+      image_asset: imageAsset,
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
     });
 
-    setLocation(''); setDetails(''); setImageUri(null);
-
+    // Only clear the form once the outcome is known. Previously the fields were
+    // reset before the result was inspected, so a failed upload would wipe the
+    // citizen's text and photo and leave them staring at an empty form.
     if (result.failed) {
-      setStatus({
-        type: 'error',
-        message: 'Could not save your report. Please try again in a moment.',
-      });
+      setStatus({ type: 'error', message: result.imageError || 'Could not save your report. Please try again in a moment.' });
       return;
     }
+
+    setLocation(''); setDetails(''); setImageUri(null); setImageAsset(null);
 
     if (result.offline) {
       // The old copy claimed the report "will sync to the community safety map
@@ -91,11 +97,18 @@ export default function ReportScreen() {
         message:
           'Saved on this device only. It is NOT uploaded yet and officers cannot see it — please submit again when you have a connection.',
       });
-    } else if (imageUri) {
+    } else if (imageUri && !result.imageUploaded) {
+      // Reached only if a photo was attached but no upload path existed.
       setStatus({
         type: 'success',
         message:
           'Thank you. Your report reached the safety engine. The photo is kept on your device only and was not uploaded.',
+      });
+    } else if (imageUri) {
+      setStatus({
+        type: 'success',
+        message:
+          'Thank you. Your report and its photo were received by the safety engine. An authorised officer can view the photo.',
       });
     } else {
       setStatus({
@@ -170,7 +183,7 @@ export default function ReportScreen() {
         {imageUri ? (
           <View style={styles.photoPreview}>
             <Image source={{ uri: imageUri }} style={styles.previewImage} />
-            <Pressable onPress={() => setImageUri(null)} style={styles.removePhoto}>
+            <Pressable onPress={() => { setImageUri(null); setImageAsset(null); }} style={styles.removePhoto}>
               <X color="#FFFFFF" size={16} />
             </Pressable>
           </View>
